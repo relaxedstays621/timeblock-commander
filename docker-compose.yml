@@ -1,0 +1,64 @@
+version: '3.8'
+
+# ─────────────────────────────────────────────────────────
+# TimeBlock Commander — Isolated Docker Stack
+# ─────────────────────────────────────────────────────────
+# This runs on its own network, own database, own port.
+# It will not interfere with any other Docker containers.
+# Access at http://YOUR_IP:3100
+
+services:
+  # ─── Database ───
+  db:
+    image: postgres:16-alpine
+    container_name: timeblock-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: timeblock
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-timeblock_secret_change_me}
+      POSTGRES_DB: timeblock
+    volumes:
+      - timeblock_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # Port 5433 to avoid conflicts with any existing Postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U timeblock"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - timeblock-net
+
+  # ─── App ───
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: timeblock-app
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      DATABASE_URL: postgresql://timeblock:${DB_PASSWORD:-timeblock_secret_change_me}@db:5432/timeblock?schema=public
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3100}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me-in-production}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      N8N_WEBHOOK_BASE_URL: ${N8N_WEBHOOK_BASE_URL:-}
+      PORT: 3100
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - timeblock-net
+
+volumes:
+  timeblock_pgdata:
+    name: timeblock_pgdata
+
+networks:
+  timeblock-net:
+    name: timeblock-net
+    driver: bridge
