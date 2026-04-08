@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSession, signIn, signOut } from 'next-auth/react';
 import { useTasks, useBlocks, useAnalytics, triggerSchedule, updateTask, completeBlock, createTask } from '@/hooks/useApi';
 import { QuickCapture } from '@/components/QuickCapture';
 import { CompanyTag, TaskTypeTag, ScoreBadge, StatusBadge, Modal, Spinner, EmptyState, SectionLabel } from '@/components/ui';
@@ -13,6 +14,7 @@ import type { Company } from '@prisma/client';
 
 export default function DashboardPage() {
   const [view, setView] = useState<string>('today');
+  const { data: session } = useSession();
   const [mobileNav, setMobileNav] = useState(false);
   const [quickCapture, setQuickCapture] = useState(false);
   const [selectedTask, setSelectedTask] = useState<any | null>(null);
@@ -68,12 +70,29 @@ export default function DashboardPage() {
             <span className="text-sm font-bold tracking-[3px]">TIMEBLOCK</span>
           </div>
         </div>
-        <button
-          className="bg-accent-red text-white px-4 py-2 rounded-lg text-[13px] font-semibold tracking-wide"
-          onClick={() => setQuickCapture(true)}
-        >
-          + Capture
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            className="bg-accent-red text-white px-4 py-2 rounded-lg text-[13px] font-semibold tracking-wide"
+            onClick={() => setQuickCapture(true)}
+          >
+            + Capture
+          </button>
+          {session ? (
+            <button
+              className="text-[12px] text-white/50 hover:text-white/80 px-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-lg"
+              onClick={() => signOut()}
+            >
+              {session.user?.email?.split('@')[0]} ↗
+            </button>
+          ) : (
+            <button
+              className="text-[12px] text-white px-3 py-2 bg-emerald-600 rounded-lg font-semibold"
+              onClick={() => signIn('google')}
+            >
+              Sign in
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="flex flex-1">

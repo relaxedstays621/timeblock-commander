@@ -1,0 +1,3 @@
+time.yourrelaxedstay.com {
+    reverse_proxy app:3100
+}

@@ -1,14 +1,4 @@
-version: '3.8'
-
-# ─────────────────────────────────────────────────────────
-# TimeBlock Commander — Isolated Docker Stack
-# ─────────────────────────────────────────────────────────
-# This runs on its own network, own database, own port.
-# It will not interfere with any other Docker containers.
-# Access at http://YOUR_IP:3100
-
 services:
-  # ─── Database ───
   db:
     image: postgres:16-alpine
     container_name: timeblock-db
@@ -20,7 +10,7 @@ services:
     volumes:
       - timeblock_pgdata:/var/lib/postgresql/data
     ports:
-      - "5433:5432"  # Port 5433 to avoid conflicts with any existing Postgres
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U timeblock"]
       interval: 5s
@@ -29,7 +19,6 @@ services:
     networks:
       - timeblock-net
 
-  # ─── App ───
   app:
     build:
       context: .
