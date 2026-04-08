@@ -4,7 +4,6 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'TimeBlock Commander',
   description: 'AI-managed time-blocking command center',
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
 };
 
 export default function RootLayout({
