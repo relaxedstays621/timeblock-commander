@@ -2,14 +2,11 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
-
-async function getUser() {
-  return prisma.user.findFirst({ where: { email: 'owner@timeblock.local' } });
-}
+import { getCurrentUser } from '@/lib/auth';
 
 // GET /api/blocks?range=day|week|month&date=YYYY-MM-DD
 export async function GET(req: NextRequest) {
-  const user = await getUser();
+  const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
@@ -47,7 +44,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/blocks — mark a block complete
 export async function PATCH(req: NextRequest) {
-  const user = await getUser();
+  const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
   const body = await req.json();

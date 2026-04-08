@@ -3,15 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { CreateTaskSchema, UpdateTaskSchema } from '@/lib/schemas';
 import { calculateScore } from '@/lib/scoring';
-
-// For Phase 1, we use a default user. Phase 2 adds auth.
-async function getUser() {
-  return prisma.user.findFirst({ where: { email: 'owner@timeblock.local' } });
-}
+import { getCurrentUser } from '@/lib/auth';
 
 // GET /api/tasks — list tasks with optional filters
 export async function GET(req: NextRequest) {
-  const user = await getUser();
+  const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
@@ -34,7 +30,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/tasks — create a new task
 export async function POST(req: NextRequest) {
-  const user = await getUser();
+  const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
   const body = await req.json();

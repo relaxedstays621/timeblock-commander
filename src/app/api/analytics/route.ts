@@ -3,14 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { analyzeCompanyBalance, detectOverload, selectTop3, calculateScore } from '@/lib/scoring';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
-
-async function getUser() {
-  return prisma.user.findFirst({ where: { email: 'owner@timeblock.local' } });
-}
+import { getCurrentUser } from '@/lib/auth';
 
 // GET /api/analytics?range=week|month
 export async function GET(req: NextRequest) {
-  const user = await getUser();
+  const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);

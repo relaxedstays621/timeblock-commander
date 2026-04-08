@@ -4,25 +4,19 @@ import { prisma } from '@/lib/db';
 import { scheduleDay, scheduleWeek, rescheduleFromNow } from '@/lib/scheduler';
 import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } from '@/lib/scoring';
 import { format, parseISO } from 'date-fns';
-
-async function getUser() {
-  return prisma.user.findFirst({
-    where: { email: 'owner@timeblock.local' },
-    include: { preferences: true },
-  });
-}
+import { getCurrentUser } from '@/lib/auth';
 
 // POST /api/schedule
 // body: { action: "day" | "week" | "reschedule", date?: string }
 export async function POST(req: NextRequest) {
-  const user = await getUser();
+  const user = await getCurrentUser({ includePreferences: true });
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
   const body = await req.json();
   const action = body.action || 'day';
   const date = body.date ? parseISO(body.date) : new Date();
 
-  const prefs = user.preferences;
+  const prefs = (user as any).preferences;
   const config = {
     primeStart: prefs?.primeHoursStart ?? 8,
     primeEnd: prefs?.primeHoursEnd ?? 12,
@@ -132,7 +126,7 @@ export async function POST(req: NextRequest) {
 
 // GET /api/schedule?date=YYYY-MM-DD — get blocks for a date
 export async function GET(req: NextRequest) {
-  const user = await getUser();
+  const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
