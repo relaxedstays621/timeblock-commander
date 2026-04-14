@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { scheduleDay, scheduleWeek, rescheduleFromNow } from '@/lib/scheduler';
 import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } from '@/lib/scoring';
 import { format, parseISO } from 'date-fns';
+import { createEvent } from '@/lib/google-calendar';
 import { getCurrentUser } from '@/lib/auth';
 
 // POST /api/schedule
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
   const tasks = await prisma.task.findMany({
     where: {
       userId: user.id,
-      status: { in: ['QUEUED', 'BACKLOG'] },
+      status: { in: ['QUEUED', 'BACKLOG', 'SCHEDULED'] },
     },
   });
 
@@ -55,25 +56,45 @@ export async function POST(req: NextRequest) {
     slots = add;
   } else if (action === 'week') {
     // Clear future non-completed blocks for the week
-    await prisma.timeBlock.deleteMany({
+    const blocksToDelete = await prisma.timeBlock.findMany({
       where: {
         userId: user.id,
         completed: false,
         date: { gte: date },
       },
     });
+    const taskIdsToReset = blocksToDelete.map(b => b.taskId).filter(Boolean) as string[];
+    await prisma.timeBlock.deleteMany({
+      where: { id: { in: blocksToDelete.map(b => b.id) } },
+    });
+    if (taskIdsToReset.length > 0) {
+      await prisma.task.updateMany({
+        where: { id: { in: taskIdsToReset }, status: 'SCHEDULED' },
+        data: { status: 'QUEUED' },
+      });
+    }
 
     slots = scheduleWeek(tasks, [], config, date);
   } else {
     // Clear non-completed blocks for the day
     const dateStr = format(date, 'yyyy-MM-dd');
-    await prisma.timeBlock.deleteMany({
+    const dayBlocksToDelete = await prisma.timeBlock.findMany({
       where: {
         userId: user.id,
         completed: false,
         date: new Date(dateStr),
       },
     });
+    const dayTaskIdsToReset = dayBlocksToDelete.map(b => b.taskId).filter(Boolean) as string[];
+    await prisma.timeBlock.deleteMany({
+      where: { id: { in: dayBlocksToDelete.map(b => b.id) } },
+    });
+    if (dayTaskIdsToReset.length > 0) {
+      await prisma.task.updateMany({
+        where: { id: { in: dayTaskIdsToReset }, status: 'SCHEDULED' },
+        data: { status: 'QUEUED' },
+      });
+    }
 
     slots = scheduleDay(tasks, date, [], config);
   }

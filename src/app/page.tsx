@@ -561,15 +561,70 @@ function AnalyticsView({ analytics, loading }: any) {
 // ─────────────────────────────────────────────────────────
 
 function SettingsView() {
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<any>(null);
+  const [calendars, setCalendars] = useState<any[]>([]);
+  const [calLoading, setCalLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/calendar')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setCalendars(data); })
+      .catch(() => {})
+      .finally(() => setCalLoading(false));
+  }, []);
+
+  const handleSync = async (action: string) => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch('/api/calendar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      setSyncResult(data);
+    } catch (e: any) {
+      setSyncResult({ error: e.message });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div>
       <h1 className="text-2xl font-bold tracking-tight mb-6">Settings & Integration</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5">
           <h3 className="font-bold mb-2">Google Calendar</h3>
-          <p className="text-[12px] text-white/40 mb-3">Connect Google Calendars for automatic time block sync.</p>
-          <div className="text-[12px] text-amber-400 mb-3"><span className="mr-1.5">●</span>Not connected — Phase 2</div>
-          <div className="text-[10px] text-white/20 font-mono mt-2">GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET</div>
+          <p className="text-[12px] text-white/40 mb-3">Sync time blocks to your Google Calendars.</p>
+          <div className="text-[12px] text-emerald-400 mb-3"><span className="mr-1.5">●</span>Connected</div>
+          {calLoading ? (
+            <div className="text-[12px] text-white/30">Loading calendars...</div>
+          ) : calendars.length > 0 ? (
+            <div className="space-y-1 mb-3">
+              {calendars.map((c: any) => (
+                <div key={c.id} className="text-[11px] text-white/50 truncate">✓ {c.summary}</div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-[12px] text-white/30 mb-3">No calendars found</div>
+          )}
+          <div className="space-y-2">
+            <button
+              className="w-full py-2 bg-emerald-600 rounded-md text-white text-[12px] font-semibold disabled:opacity-50"
+              onClick={() => handleSync('sync')}
+              disabled={syncing}
+            >
+              {syncing ? 'Syncing...' : 'Sync Today to Calendar'}
+            </button>
+          </div>
+          {syncResult && (
+            <div className={`mt-3 p-2 rounded text-[11px] ${syncResult.error ? 'bg-red-400/10 text-red-400' : 'bg-emerald-400/10 text-emerald-400'}`}>
+              {syncResult.error ? syncResult.error : `Synced ${syncResult.synced} blocks, ${syncResult.errors} errors`}
+            </div>
+          )}
         </div>
         <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5">
           <h3 className="font-bold mb-2">n8n Automation</h3>
