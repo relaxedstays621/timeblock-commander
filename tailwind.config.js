@@ -20,7 +20,7 @@ module.exports = {
         company: {
           aperture: '#e94560',
           rentals: '#16a085',
-          diyp: '#f39c12',
+          diyp: '#0096FF',
           personal: '#7c8cf8',
         },
       },

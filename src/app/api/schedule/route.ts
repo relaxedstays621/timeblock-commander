@@ -76,22 +76,20 @@ export async function POST(req: NextRequest) {
 
     slots = scheduleWeek(tasks, [], config, date);
   } else {
-    // Clear non-completed blocks for the day
+    // Clear ALL non-completed blocks for the day
     const dateStr = format(date, 'yyyy-MM-dd');
-    const dayBlocksToDelete = await prisma.timeBlock.findMany({
-      where: {
-        userId: user.id,
-        completed: false,
-        date: new Date(dateStr),
-      },
+    // Reset any SCHEDULED tasks back to QUEUED
+    const dayBlocks = await prisma.timeBlock.findMany({
+      where: { userId: user.id, date: new Date(dateStr) },
     });
-    const dayTaskIdsToReset = dayBlocksToDelete.map(b => b.taskId).filter(Boolean) as string[];
+    const taskIdsToReset = dayBlocks.filter(b => !b.completed && b.taskId).map(b => b.taskId) as string[];
+    // Delete all non-completed blocks
     await prisma.timeBlock.deleteMany({
-      where: { id: { in: dayBlocksToDelete.map(b => b.id) } },
+      where: { userId: user.id, completed: false, date: new Date(dateStr) },
     });
-    if (dayTaskIdsToReset.length > 0) {
+    if (taskIdsToReset.length > 0) {
       await prisma.task.updateMany({
-        where: { id: { in: dayTaskIdsToReset }, status: 'SCHEDULED' },
+        where: { id: { in: taskIdsToReset }, status: { in: ['SCHEDULED', 'IN_PROGRESS'] } },
         data: { status: 'QUEUED' },
       });
     }

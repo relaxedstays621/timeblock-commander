@@ -19,6 +19,7 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
   const [taskType, setTaskType] = useState<TaskType>('BUILDING');
   const [urgency, setUrgency] = useState(5);
   const [context, setContext] = useState('');
+  const [duration, setDuration] = useState(60);
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -48,7 +49,7 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
         taskType: company === 'PERSONAL' ? undefined : taskType,
         priority: 5,
         urgency,
-        estimatedMinutes: 60,
+        estimatedMinutes: duration,
         energyLevel: 'MEDIUM',
         isStrategic: false,
         isReactive: urgency >= 7,
@@ -134,6 +135,26 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
             onChange={(e) => setUrgency(Number(e.target.value))}
             className="w-full"
           />
+        </div>
+
+        {/* Duration */}
+        <div>
+          <label className="block text-[11px] font-semibold text-white/40 tracking-wide mb-2">Duration</label>
+          <div className="flex flex-wrap gap-1.5">
+            {[15, 30, 45, 60, 90, 120, 180, 240].map((d) => (
+              <button
+                key={d}
+                className={`px-3 py-1.5 rounded-md text-[11px] font-semibold border transition-all ${
+                  duration === d
+                    ? 'bg-accent-red/80 text-white border-transparent'
+                    : 'text-white/50 bg-white/[0.04] border-white/[0.08] hover:border-white/20'
+                }`}
+                onClick={() => setDuration(d)}
+              >
+                {d >= 60 ? `${d / 60}h` : `${d}m`}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Context */}

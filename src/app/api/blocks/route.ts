@@ -69,3 +69,34 @@ export async function PATCH(req: NextRequest) {
 
   return NextResponse.json(block);
 }
+
+// DELETE /api/blocks — clear today's non-completed blocks
+export async function DELETE(req: NextRequest) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Get blocks to find task IDs
+  const blocks = await prisma.timeBlock.findMany({
+    where: { userId: user.id, completed: false, date: today },
+  });
+
+  const taskIds = blocks.filter(b => b.taskId).map(b => b.taskId) as string[];
+
+  // Delete blocks
+  const deleted = await prisma.timeBlock.deleteMany({
+    where: { userId: user.id, completed: false, date: today },
+  });
+
+  // Reset task statuses
+  if (taskIds.length > 0) {
+    await prisma.task.updateMany({
+      where: { id: { in: taskIds }, status: { in: ['SCHEDULED', 'IN_PROGRESS'] } },
+      data: { status: 'QUEUED' },
+    });
+  }
+
+  return NextResponse.json({ cleared: deleted.count });
+}

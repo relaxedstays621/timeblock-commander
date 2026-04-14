@@ -38,10 +38,55 @@ function calendarIdForCompany(
   }
 }
 
-// GET /api/calendar — list the signed-in user's Google calendars
-export async function GET() {
-  const user = await getCurrentUser();
+// GET /api/calendar — list calendars or fetch events
+export async function GET(req: NextRequest) {
+  const user = await getCurrentUser({ includePreferences: true });
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const action = searchParams.get('action');
+  const dateStr = searchParams.get('date');
+
+  if (action === 'events' && dateStr) {
+    try {
+      const prefs = (user as any).preferences;
+      const calIds = [
+        prefs?.calendarAperture,
+        prefs?.calendarRentals,
+        prefs?.calendarDiyp,
+        prefs?.calendarPersonal,
+      ].filter(Boolean).flatMap((id: string) => id.split(','));
+
+      const dayStart = new Date(dateStr + 'T00:00:00');
+      const dayEnd = new Date(dateStr + 'T23:59:59');
+
+      const { listEvents } = await import('@/lib/google-calendar');
+      const allEvents: any[] = [];
+
+      for (const calId of calIds) {
+        try {
+          const events = await listEvents(user.id, calId.trim(), dayStart, dayEnd);
+          allEvents.push(...(events || []));
+        } catch (e) {
+          // Skip calendars that fail
+        }
+      }
+
+      // Sort by start time
+      allEvents.sort((a, b) => {
+        const aStart = new Date(a.start?.dateTime || a.start?.date || 0);
+        const bStart = new Date(b.start?.dateTime || b.start?.date || 0);
+        return aStart.getTime() - bStart.getTime();
+      });
+
+      return NextResponse.json(allEvents);
+    } catch (err: any) {
+      return NextResponse.json(
+        { error: err?.message ?? 'Failed to fetch events' },
+        { status: 500 }
+      );
+    }
+  }
 
   try {
     const calendars = await listCalendars(user.id);

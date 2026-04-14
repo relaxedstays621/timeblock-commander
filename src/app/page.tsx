@@ -124,8 +124,13 @@ export default function DashboardPage() {
             <button className="block w-full text-left px-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-md text-[12px] text-white/60 hover:text-white/80 mb-1" onClick={() => handleSchedule('week')}>
               ▦ Schedule Week
             </button>
-            <button className="block w-full text-left px-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-md text-[12px] text-white/60 hover:text-white/80" onClick={() => handleSchedule('reschedule')}>
-              ⚡ Reschedule Now
+            <button className="block w-full text-left px-3 py-2 bg-red-500/[0.08] border border-red-500/[0.15] rounded-md text-[12px] text-red-400/70 hover:text-red-400" onClick={async () => {
+              if (confirm('Clear all unfinished blocks for today?')) {
+                await fetch('/api/blocks', { method: 'DELETE' });
+                refreshAll();
+              }
+            }}>
+              ✕ Clear Today
             </button>
           </div>
 
@@ -231,6 +236,43 @@ export default function DashboardPage() {
 function TodayView({ blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask, onCompleteBlock, onReschedule }: any) {
   const now = new Date();
   const currentHour = now.getHours();
+  const [dayStartHour, setDayStartHour] = useState(currentHour < 12 ? Math.max(currentHour, 6) : 6);
+  const [calEvents, setCalEvents] = useState<any[]>([]);
+  const [buffers, setBuffers] = useState<Record<string, boolean>>({});
+  const [ignoredEvents, setIgnoredEvents] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const todayStr = now.toISOString().split('T')[0];
+    fetch(`/api/calendar?action=events&date=${todayStr}`)
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          const active = data.filter((e: any) => e.status !== 'cancelled');
+          setCalEvents(active);
+          const initialBuffers: Record<string, boolean> = {};
+          active.forEach((e: any) => { initialBuffers[e.id] = true; });
+          setBuffers(initialBuffers);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Filter hours to show from day start
+  const visibleHours = HOURS.filter(h => h >= dayStartHour);
+
+  // Map calendar events to hours
+  const getCalEventForHour = (hour: number) => {
+    return calEvents.find((e: any) => {
+      const start = new Date(e.start?.dateTime || e.start?.date);
+      return start.getHours() === hour;
+    });
+  };
+  const getBufferForHour = (hour: number) => {
+    return calEvents.find((e: any) => {
+      const start = new Date(e.start?.dateTime || e.start?.date);
+      return start.getHours() === hour + 1 && buffers[e.id];
+    });
+  };
 
   return (
     <div>
@@ -239,9 +281,25 @@ function TodayView({ blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask
           <h1 className="text-2xl font-bold tracking-tight">{now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</h1>
           <p className="text-[13px] text-white/40 mt-1">{blocks.length} blocks · {carryovers.length} carryover</p>
         </div>
-        <button className="px-4 py-2 bg-white/[0.06] border border-white/10 rounded-lg text-[13px] text-white/80" onClick={onReschedule}>
-          ↻ Reschedule
-        </button>
+        <div className="flex items-center gap-2">
+          <label className="text-[11px] text-white/40">Start:</label>
+          <select
+            className="px-2 py-1.5 bg-white/[0.06] border border-white/10 rounded-md text-[12px] text-white/80"
+            value={dayStartHour}
+            onChange={(e) => setDayStartHour(Number(e.target.value))}
+          >
+            {Array.from({ length: 24 }, (_, i) => {
+              const hour = Math.floor(i / 2) + 5;
+              const min = i % 2 === 0 ? '00' : '30';
+              const display = `${hour > 12 ? hour - 12 : hour}:${min}${hour >= 12 ? 'pm' : 'am'}`;
+              const val = hour + (i % 2 === 0 ? 0 : 0.5);
+              return <option key={val} value={val}>{display}</option>;
+            })}
+          </select>
+          <button className="px-3 py-1.5 bg-white/[0.06] border border-white/10 rounded-md text-[12px] text-white/80" onClick={onReschedule}>
+            ↻ Reschedule
+          </button>
+        </div>
       </div>
 
       {/* Top 3 Banner */}
@@ -270,14 +328,18 @@ function TodayView({ blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask
 
       {/* Timeline */}
       <div className="mb-6">
-        {HOURS.map((hour) => {
+        {visibleHours.map((hour) => {
           const block = blocks.find((b: any) => b.startHour === hour);
           const isPrime = hour >= 8 && hour < 12;
           const isCurrent = hour === currentHour;
           const task = block?.task;
+          const blockHeight = block ? Math.max(48, (block.durationMinutes / 60) * 80) : 56;
+          const calEvent = getCalEventForHour(hour);
+          const calEventDuration = calEvent ? Math.max(15, (new Date(calEvent.end?.dateTime || calEvent.end?.date).getTime() - new Date(calEvent.start?.dateTime || calEvent.start?.date).getTime()) / 60000) : 60;
+          const calEventHeight = calEvent ? Math.max(32, (calEventDuration / 60) * 80) : 56;
 
           return (
-            <div key={hour} className={`flex gap-4 min-h-[56px] border-b border-white/[0.04] ${isCurrent ? 'bg-accent-red/[0.04]' : ''}`}>
+            <div key={hour} className={`flex gap-4 border-b border-white/[0.04] ${isCurrent ? 'bg-accent-red/[0.04]' : ''}`} style={{ minHeight: block ? blockHeight : calEvent ? calEventHeight : 56 }}>
               <div className="w-14 flex items-center justify-end gap-1 flex-shrink-0 pr-2">
                 <span className="text-[12px] text-white/30 font-medium tabular-nums">
                   {hour > 12 ? hour - 12 : hour}{hour >= 12 ? 'p' : 'a'}
@@ -287,33 +349,77 @@ function TodayView({ blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask
               <div className="flex-1 py-1">
                 {block ? (
                   <div
-                    className="px-3.5 py-2.5 rounded-lg cursor-pointer hover:bg-white/[0.05] transition-colors"
+                    className={`flex items-start gap-3 px-3.5 py-2.5 rounded-lg cursor-pointer transition-colors ${block.completed ? 'opacity-50' : 'hover:bg-white/[0.05]'}`}
                     style={{
-                      borderLeft: `3px solid ${COMPANY_COLORS[block.company as Company]?.accent}`,
-                      background: isCurrent ? 'rgba(233,69,96,0.08)' : 'rgba(255,255,255,0.03)',
+                      borderLeft: `3px solid ${block.completed ? 'rgba(255,255,255,0.15)' : COMPANY_COLORS[block.company as Company]?.accent}`,
+                      background: block.completed ? 'rgba(22,160,133,0.06)' : isCurrent ? 'rgba(233,69,96,0.08)' : 'rgba(255,255,255,0.03)',
                     }}
-                    onClick={() => task && onSelectTask(task)}
                   >
-                    <div className="text-[14px] font-semibold mb-1.5">{block.title}</div>
-                    <div className="flex gap-2 items-center flex-wrap">
-                      <CompanyTag company={block.company} />
-                      <TaskTypeTag type={block.taskType} />
-                      <span className="text-[10px] text-white/35">{block.durationMinutes}m</span>
+                    <button
+                      className={`mt-0.5 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                        block.completed
+                          ? 'bg-emerald-500 border-emerald-500 text-white'
+                          : 'border-white/20 hover:border-emerald-400 hover:bg-emerald-400/10 text-transparent hover:text-emerald-400'
+                      }`}
+                      onClick={(e) => { e.stopPropagation(); if (!block.completed) onCompleteBlock(block.id); }}
+                    >
+                      <span className="text-[12px] font-bold">✓</span>
+                    </button>
+                    <div className="flex-1 min-w-0" onClick={() => task && onSelectTask(task)}>
+                      <div className={`text-[14px] font-semibold mb-1.5 ${block.completed ? 'line-through text-white/40' : ''}`}>{block.title}</div>
+                      <div className="flex gap-2 items-center flex-wrap">
+                        <CompanyTag company={block.company} />
+                        <TaskTypeTag type={block.taskType} />
+                        <span className="text-[10px] text-white/35">{block.durationMinutes}m</span>
+                        {block.completed && <span className="text-[10px] text-emerald-400 font-semibold">Complete</span>}
+                      </div>
+                      {!block.completed && (
+                        <div className="flex gap-1.5 mt-2">
+                          <button
+                            className="px-2.5 py-1 bg-white/[0.06] border border-white/10 rounded text-[11px] text-white/60 hover:text-amber-400 hover:border-amber-400/30"
+                            onClick={(e) => { e.stopPropagation(); task && onUpdateTask(task.id, { status: 'DEFERRED' }); }}
+                          >
+                            → Defer
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex gap-1.5 mt-2">
+                  </div>
+                ) : calEvent && !ignoredEvents[calEvent.id] ? (
+                  <div className="px-3.5 py-2.5 rounded-lg bg-purple-500/[0.08] border-l-[3px] border-purple-400" style={{ minHeight: calEventHeight }}>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="text-[14px] font-semibold mb-1">{calEvent.summary}</div>
+                        <div className="flex gap-2 items-center">
+                          <span className="text-[10px] text-purple-400 font-semibold">Calendar</span>
+                          <span className="text-[10px] text-white/35">
+                            {new Date(calEvent.start?.dateTime || calEvent.start?.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                            {' - '}
+                            {new Date(calEvent.end?.dateTime || calEvent.end?.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                          <span className="text-[10px] text-white/25">{Math.round(calEventDuration)}m</span>
+                        </div>
+                      </div>
                       <button
-                        className="px-2.5 py-1 bg-white/[0.06] border border-white/10 rounded text-[11px] text-white/60 hover:text-emerald-400 hover:border-emerald-400/30"
-                        onClick={(e) => { e.stopPropagation(); onCompleteBlock(block.id); }}
+                        className="text-[10px] text-white/25 hover:text-red-400 px-1.5 py-0.5"
+                        onClick={() => setIgnoredEvents(prev => ({ ...prev, [calEvent.id]: true }))}
                       >
-                        ✓ Done
-                      </button>
-                      <button
-                        className="px-2.5 py-1 bg-white/[0.06] border border-white/10 rounded text-[11px] text-white/60 hover:text-amber-400 hover:border-amber-400/30"
-                        onClick={(e) => { e.stopPropagation(); task && onUpdateTask(task.id, { status: 'DEFERRED' }); }}
-                      >
-                        → Defer
+                        ignore
                       </button>
                     </div>
+                  </div>
+                ) : getBufferForHour(hour) && !ignoredEvents[getBufferForHour(hour).id] ? (
+                  <div className="flex items-center justify-between px-3.5 py-1.5 rounded-lg bg-amber-400/[0.05] border-l-[3px] border-amber-400/40" style={{ minHeight: 28 }}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-amber-400/70">⏱ 15m prep</span>
+                      <span className="text-[10px] text-white/30">before {getBufferForHour(hour).summary}</span>
+                    </div>
+                    <button
+                      className="text-[10px] text-white/30 hover:text-red-400 px-2 py-0.5 rounded"
+                      onClick={() => setBuffers(prev => ({ ...prev, [getBufferForHour(hour).id]: false }))}
+                    >
+                      ✕
+                    </button>
                   </div>
                 ) : (
                   <div className="px-3.5 py-2.5 text-[12px] text-white/[0.12]">Available</div>

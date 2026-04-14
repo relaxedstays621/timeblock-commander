@@ -10,7 +10,7 @@ export const COMPANY_DISPLAY: Record<Company, string> = {
 export const COMPANY_COLORS: Record<Company, { accent: string; bg: string }> = {
   APERTURE_ADS: { accent: '#e94560', bg: 'rgba(233,69,96,0.12)' },
   RENTALS: { accent: '#16a085', bg: 'rgba(22,160,133,0.12)' },
-  DIYP: { accent: '#f39c12', bg: 'rgba(243,156,18,0.12)' },
+  DIYP: { accent: '#0096FF', bg: 'rgba(243,156,18,0.12)' },
   PERSONAL: { accent: '#7c8cf8', bg: 'rgba(124,140,248,0.12)' },
 };
 
