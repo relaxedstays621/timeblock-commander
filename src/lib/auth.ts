@@ -45,7 +45,11 @@ export const authOptions: NextAuthOptions = {
  *
  * Resolution order:
  *   1. NextAuth session (if signed in) — looked up by id
- *   2. Hardcoded seed user `owner@timeblock.local` — fallback during transition
+ *   2. (dev only) Hardcoded seed user `owner@timeblock.local`, behind
+ *      `ALLOW_DEV_USER_FALLBACK=1` and `NODE_ENV !== 'production'`.
+ *
+ * Returns null for unauthenticated callers in production so route handlers
+ * can reject them cleanly.
  *
  * Optionally includes related data (preferences) when `opts.includePreferences` is true.
  */
@@ -61,8 +65,15 @@ export async function getCurrentUser(opts?: { includePreferences?: boolean }) {
     if (user) return user;
   }
 
-  return prisma.user.findFirst({
-    where: { email: 'owner@timeblock.local' },
-    include,
-  });
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.ALLOW_DEV_USER_FALLBACK === '1'
+  ) {
+    return prisma.user.findFirst({
+      where: { email: 'owner@timeblock.local' },
+      include,
+    });
+  }
+
+  return null;
 }
