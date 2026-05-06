@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { toLocalDateString } from '@/lib/local-date';
 
 // ─────────────────────────────────────────────────────────
 // GENERIC FETCHER
@@ -80,7 +81,7 @@ export function useBlocks(range: 'day' | 'week' | 'month' = 'day', date?: string
   const [refetching, setRefetching] = useState(false);
   const hasLoaded = useRef(false);
 
-  const dateStr = date || new Date().toISOString().split('T')[0];
+  const dateStr = date || toLocalDateString();
   const url = `/api/blocks?range=${range}&date=${dateStr}`;
 
   const refresh = useCallback(async () => {
