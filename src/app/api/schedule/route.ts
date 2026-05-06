@@ -67,14 +67,23 @@ export async function POST(req: NextRequest) {
           range: { gte: weekStart, lte: weekEnd },
         });
 
-        // Survivors = blocks that remain after the clear (completed, or
-        // outside this week). Re-query inside the tx so the scheduler sees
-        // a consistent post-clear state.
+        // Refetch tasks AFTER clearBlocks so we observe the post-reset
+        // statuses. Anything that was SCHEDULED with a block in this week
+        // has just been flipped to QUEUED in-DB, but the outer `tasks`
+        // snapshot still reads SCHEDULED — and scheduleWeek's filter would
+        // then drop every one of them, producing an empty plan.
+        const freshTasks = await tx.task.findMany({
+          where: {
+            userId: user.id,
+            status: { in: ['QUEUED', 'BACKLOG', 'SCHEDULED'] },
+          },
+        });
+
         const survivingBlocks = await tx.timeBlock.findMany({
           where: { userId: user.id },
         });
 
-        slots = scheduleWeek(tasks, survivingBlocks, config, date);
+        slots = scheduleWeek(freshTasks, survivingBlocks, config, date);
       } else {
         const dateStr = format(date, 'yyyy-MM-dd');
         const targetDate = new Date(dateStr);
@@ -84,11 +93,20 @@ export async function POST(req: NextRequest) {
           range: targetDate,
         });
 
+        // See note in the 'week' branch — refetch tasks post-clear so the
+        // planner sees QUEUED-reset statuses, not the pre-clear snapshot.
+        const freshTasks = await tx.task.findMany({
+          where: {
+            userId: user.id,
+            status: { in: ['QUEUED', 'BACKLOG', 'SCHEDULED'] },
+          },
+        });
+
         const survivingBlocks = await tx.timeBlock.findMany({
           where: { userId: user.id },
         });
 
-        slots = scheduleDay(tasks, date, survivingBlocks, config);
+        slots = scheduleDay(freshTasks, date, survivingBlocks, config);
       }
 
       if (slots.length === 0) return [];
