@@ -21,6 +21,7 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
   const [context, setContext] = useState('');
   const [duration, setDuration] = useState(60);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -40,6 +41,7 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
   const submit = async () => {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
+    setSubmitError(null);
 
     try {
       await createTask({
@@ -60,8 +62,10 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
       reset();
       onCreated();
       onClose();
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to create task:', e);
+      // Keep the modal open and show the error so the user can retry/fix.
+      setSubmitError(e?.message ?? 'Failed to create task');
     } finally {
       setSubmitting(false);
     }
@@ -165,6 +169,12 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
           onChange={(e) => setContext(e.target.value)}
           rows={2}
         />
+
+        {submitError && (
+          <div className="px-3 py-2 rounded-md bg-red-500/10 border border-red-500/20 text-[12px] text-red-300">
+            {submitError}
+          </div>
+        )}
 
         {/* Submit */}
         <button

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 // ─────────────────────────────────────────────────────────
 // GENERIC FETCHER
@@ -25,13 +25,15 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
 export function useTasks(filters?: Record<string, string>) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refetching, setRefetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasLoaded = useRef(false);
 
   const params = new URLSearchParams(filters || {}).toString();
   const url = `/api/tasks${params ? `?${params}` : ''}`;
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (hasLoaded.current) setRefetching(true);
     try {
       const data = await api<any[]>(url);
       setTasks(data);
@@ -39,13 +41,15 @@ export function useTasks(filters?: Record<string, string>) {
     } catch (e: any) {
       setError(e.message);
     } finally {
+      hasLoaded.current = true;
       setLoading(false);
+      setRefetching(false);
     }
   }, [url]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  return { tasks, loading, error, refresh };
+  return { tasks, loading, refetching, error, refresh };
 }
 
 export async function createTask(data: any) {
@@ -73,25 +77,29 @@ export async function deleteTask(id: string) {
 export function useBlocks(range: 'day' | 'week' | 'month' = 'day', date?: string) {
   const [blocks, setBlocks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refetching, setRefetching] = useState(false);
+  const hasLoaded = useRef(false);
 
   const dateStr = date || new Date().toISOString().split('T')[0];
   const url = `/api/blocks?range=${range}&date=${dateStr}`;
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (hasLoaded.current) setRefetching(true);
     try {
       const data = await api<any[]>(url);
       setBlocks(data);
     } catch (e) {
       console.error('Failed to load blocks:', e);
     } finally {
+      hasLoaded.current = true;
       setLoading(false);
+      setRefetching(false);
     }
   }, [url]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  return { blocks, loading, refresh };
+  return { blocks, loading, refetching, refresh };
 }
 
 export async function completeBlock(id: string, actualMinutes?: number) {
@@ -119,20 +127,24 @@ export async function triggerSchedule(action: 'day' | 'week' | 'reschedule', dat
 export function useAnalytics(range: 'week' | 'month' = 'week') {
   const [analytics, setAnalytics] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refetching, setRefetching] = useState(false);
+  const hasLoaded = useRef(false);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (hasLoaded.current) setRefetching(true);
     try {
       const data = await api<any>(`/api/analytics?range=${range}`);
       setAnalytics(data);
     } catch (e) {
       console.error('Failed to load analytics:', e);
     } finally {
+      hasLoaded.current = true;
       setLoading(false);
+      setRefetching(false);
     }
   }, [range]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  return { analytics, loading, refresh };
+  return { analytics, loading, refetching, refresh };
 }

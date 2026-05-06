@@ -6,6 +6,7 @@ import { useTasks, useBlocks, useAnalytics, triggerSchedule, updateTask, complet
 import { QuickCapture } from '@/components/QuickCapture';
 import { CompanyTag, TaskTypeTag, ScoreBadge, StatusBadge, Modal, Spinner, EmptyState, SectionLabel } from '@/components/ui';
 import { COMPANY_DISPLAY, COMPANY_COLORS, TASK_TYPE_DISPLAY, HOURS } from '@/lib/constants';
+import { selectTop3 } from '@/lib/scoring';
 import type { Company } from '@prisma/client';
 
 // ─────────────────────────────────────────────────────────
@@ -18,9 +19,18 @@ export default function DashboardPage() {
   const [mobileNav, setMobileNav] = useState(false);
   const [quickCapture, setQuickCapture] = useState(false);
   const [selectedTask, setSelectedTask] = useState<any | null>(null);
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
+
+  // `now` ticks every minute so "today" and current-hour highlighting
+  // advance even when the page is left open.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const { tasks, loading: tasksLoading, refresh: refreshTasks } = useTasks();
-  const { blocks, loading: blocksLoading, refresh: refreshBlocks } = useBlocks('week');
+  const { blocks, refresh: refreshBlocks } = useBlocks('week');
   const { analytics, loading: analyticsLoading, refresh: refreshAnalytics } = useAnalytics();
 
   const refreshAll = useCallback(() => {
@@ -29,27 +39,46 @@ export default function DashboardPage() {
     refreshAnalytics();
   }, [refreshTasks, refreshBlocks, refreshAnalytics]);
 
+  const reportError = useCallback((message: string) => {
+    setErrorBanner(message);
+    setTimeout(() => setErrorBanner(null), 6000);
+  }, []);
+
   const handleSchedule = async (action: 'day' | 'week' | 'reschedule') => {
-    await triggerSchedule(action);
-    refreshAll();
+    try {
+      await triggerSchedule(action);
+      refreshAll();
+    } catch (e: any) {
+      reportError(e?.message ?? 'Failed to schedule');
+    }
   };
 
   const handleUpdateTask = async (id: string, data: any) => {
-    await updateTask(id, data);
-    refreshAll();
+    try {
+      await updateTask(id, data);
+      refreshAll();
+    } catch (e: any) {
+      reportError(e?.message ?? 'Failed to update task');
+      throw e; // let inner handlers know the update failed
+    }
   };
 
   const handleCompleteBlock = async (blockId: string) => {
-    await completeBlock(blockId);
-    refreshAll();
+    try {
+      await completeBlock(blockId);
+      refreshAll();
+    } catch (e: any) {
+      reportError(e?.message ?? 'Failed to complete block');
+    }
   };
 
   // Derived data
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = now.toISOString().split('T')[0];
   const todayBlocks = blocks.filter((b: any) => b.date?.split('T')[0] === todayStr).sort((a: any, b: any) => a.startHour - b.startHour);
-  const activeTasks = tasks.filter((t: any) => t.status !== 'COMPLETE' && t.status !== 'DROPPED');
   const carryovers = tasks.filter((t: any) => t.carryover);
-  const top3 = [...activeTasks].sort((a: any, b: any) => (b.compositeScore || 0) - (a.compositeScore || 0)).slice(0, 3);
+  // Use the same top-3 selection as the scheduler/analytics so sidebar,
+  // banner, and analytics stay consistent (cross-company spread, etc).
+  const top3 = selectTop3(tasks as any);
 
   const navItems = [
     { key: 'today', label: 'Today', icon: '◉' },
@@ -94,6 +123,13 @@ export default function DashboardPage() {
           )}
         </div>
       </header>
+
+      {errorBanner && (
+        <div className="px-5 py-2 bg-red-500/[0.12] border-b border-red-500/20 text-[12px] text-red-300 flex justify-between items-center">
+          <span>{errorBanner}</span>
+          <button className="text-red-300/70 hover:text-red-300" onClick={() => setErrorBanner(null)}>✕</button>
+        </div>
+      )}
 
       <div className="flex flex-1">
         {/* ─── SIDEBAR ─── */}
@@ -176,12 +212,13 @@ export default function DashboardPage() {
         {/* ─── MAIN ─── */}
         <main className="flex-1 md:ml-[260px] p-4 md:p-6 overflow-y-auto min-h-[calc(100vh-52px)]">
           <div className="max-w-[900px] mx-auto">
-            {tasksLoading ? (
+            {tasksLoading && tasks.length === 0 ? (
               <Spinner />
             ) : (
               <>
                 {view === 'today' && (
                   <TodayView
+                    now={now}
                     blocks={todayBlocks}
                     tasks={tasks}
                     top3={top3}
@@ -193,7 +230,7 @@ export default function DashboardPage() {
                   />
                 )}
                 {view === 'week' && (
-                  <WeekView blocks={blocks} tasks={tasks} onSelectTask={setSelectedTask} />
+                  <WeekView now={now} blocks={blocks} tasks={tasks} onSelectTask={setSelectedTask} />
                 )}
                 {view === 'queue' && (
                   <QueueView tasks={tasks} onSelectTask={setSelectedTask} onUpdateTask={handleUpdateTask} />
@@ -234,29 +271,50 @@ export default function DashboardPage() {
 // TODAY VIEW
 // ─────────────────────────────────────────────────────────
 
-function TodayView({ blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask, onCompleteBlock, onReschedule }: any) {
-  const now = new Date();
+function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask, onCompleteBlock, onReschedule }: any) {
   const currentHour = now.getHours();
-  const [dayStartHour, setDayStartHour] = useState(currentHour < 12 ? Math.max(currentHour, 6) : 6);
+  // Always start at the current hour (clamped to >= 6) so afternoon visits
+  // don't snap back to 6am.
+  const [dayStartHour, setDayStartHour] = useState(() => Math.max(currentHour, 6));
   const [calEvents, setCalEvents] = useState<any[]>([]);
-  const [buffers, setBuffers] = useState<Record<string, boolean>>({});
-  const [ignoredEvents, setIgnoredEvents] = useState<Record<string, boolean>>({});
+  const todayStr = now.toISOString().split('T')[0];
+  const buffersKey = `tb:today:buffers:${todayStr}`;
+  const ignoredKey = `tb:today:ignoredEvents:${todayStr}`;
+  const [buffers, setBuffers] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(buffersKey) || '{}'); } catch { return {}; }
+  });
+  const [ignoredEvents, setIgnoredEvents] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(ignoredKey) || '{}'); } catch { return {}; }
+  });
+
+  // Persist buffer/ignore decisions across tab switches and reloads.
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem(buffersKey, JSON.stringify(buffers));
+  }, [buffers, buffersKey]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem(ignoredKey, JSON.stringify(ignoredEvents));
+  }, [ignoredEvents, ignoredKey]);
 
   useEffect(() => {
-    const todayStr = now.toISOString().split('T')[0];
     fetch(`/api/calendar?action=events&date=${todayStr}`)
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) {
           const active = data.filter((e: any) => e.status !== 'cancelled');
           setCalEvents(active);
-          const initialBuffers: Record<string, boolean> = {};
-          active.forEach((e: any) => { initialBuffers[e.id] = true; });
-          setBuffers(initialBuffers);
+          // Default new events to "buffer on" without overwriting existing
+          // user choices that were restored from localStorage.
+          setBuffers((prev) => {
+            const next = { ...prev };
+            for (const e of active) if (!(e.id in next)) next[e.id] = true;
+            return next;
+          });
         }
       })
       .catch(() => {});
-  }, []);
+  }, [todayStr]);
 
   // Filter hours to show from day start
   const visibleHours = HOURS.filter(h => h >= dayStartHour);
@@ -289,12 +347,9 @@ function TodayView({ blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask
             value={dayStartHour}
             onChange={(e) => setDayStartHour(Number(e.target.value))}
           >
-            {Array.from({ length: 24 }, (_, i) => {
-              const hour = Math.floor(i / 2) + 5;
-              const min = i % 2 === 0 ? '00' : '30';
-              const display = `${hour > 12 ? hour - 12 : hour}:${min}${hour >= 12 ? 'pm' : 'am'}`;
-              const val = hour + (i % 2 === 0 ? 0 : 0.5);
-              return <option key={val} value={val}>{display}</option>;
+            {HOURS.map((hour) => {
+              const display = `${hour > 12 ? hour - 12 : hour}:00${hour >= 12 ? 'pm' : 'am'}`;
+              return <option key={hour} value={hour}>{display}</option>;
             })}
           </select>
           <button className="px-3 py-1.5 bg-white/[0.06] border border-white/10 rounded-md text-[12px] text-white/80" onClick={onReschedule}>
@@ -451,8 +506,8 @@ function TodayView({ blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask
 // WEEK VIEW
 // ─────────────────────────────────────────────────────────
 
-function WeekView({ blocks, tasks, onSelectTask }: any) {
-  const today = new Date();
+function WeekView({ now, blocks, tasks, onSelectTask }: any) {
+  const today = now;
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(today);
     d.setDate(today.getDate() - today.getDay() + i + 1);
