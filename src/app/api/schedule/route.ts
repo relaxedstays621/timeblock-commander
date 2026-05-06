@@ -42,85 +42,84 @@ export async function POST(req: NextRequest) {
     where: { userId: user.id },
   });
 
-  let slots;
+  // Wrap the entire pre-clear + plan + insert + status-update in one
+  // interactive transaction so a failed insert (e.g. unique-constraint on
+  // (userId, date, startHour)) rolls the clear back instead of leaving the
+  // user with a wiped calendar and no replacement.
+  const created = await prisma.$transaction(
+    async (tx) => {
+      let slots;
 
-  if (action === 'reschedule') {
-    const { keep, remove, add } = rescheduleFromNow(tasks, existingBlocks, config);
+      if (action === 'reschedule') {
+        const { remove, add } = rescheduleFromNow(tasks, existingBlocks, config);
+        if (remove.length > 0) {
+          await tx.timeBlock.deleteMany({
+            where: { id: { in: remove.map((b) => b.id) } },
+          });
+        }
+        slots = add;
+      } else if (action === 'week') {
+        const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+        const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
 
-    // Delete removable blocks
-    if (remove.length > 0) {
-      await prisma.timeBlock.deleteMany({
-        where: { id: { in: remove.map((b) => b.id) } },
+        await clearBlocks(tx, {
+          userId: user.id,
+          range: { gte: weekStart, lte: weekEnd },
+        });
+
+        // Survivors = blocks that remain after the clear (completed, or
+        // outside this week). Re-query inside the tx so the scheduler sees
+        // a consistent post-clear state.
+        const survivingBlocks = await tx.timeBlock.findMany({
+          where: { userId: user.id },
+        });
+
+        slots = scheduleWeek(tasks, survivingBlocks, config, date);
+      } else {
+        const dateStr = format(date, 'yyyy-MM-dd');
+        const targetDate = new Date(dateStr);
+
+        await clearBlocks(tx, {
+          userId: user.id,
+          range: targetDate,
+        });
+
+        const survivingBlocks = await tx.timeBlock.findMany({
+          where: { userId: user.id },
+        });
+
+        slots = scheduleDay(tasks, date, survivingBlocks, config);
+      }
+
+      if (slots.length === 0) return [];
+
+      const blocks = await tx.timeBlock.createManyAndReturn({
+        data: slots.map((slot) => ({
+          date: new Date(slot.date),
+          startHour: slot.startHour,
+          durationMinutes: slot.durationMinutes,
+          title: slot.title,
+          company: slot.company,
+          taskType: slot.taskType as TaskType | null,
+          taskId: slot.taskId,
+          userId: user.id,
+        })),
       });
-    }
 
-    slots = add;
-  } else if (action === 'week') {
-    // Clear non-completed blocks for THIS week only, then schedule.
-    const weekStart = startOfWeek(date, { weekStartsOn: 1 });
-    const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
+      const taskIds = slots.map((s) => s.taskId);
+      if (taskIds.length > 0) {
+        await tx.task.updateMany({
+          where: { id: { in: taskIds }, userId: user.id },
+          data: { status: 'SCHEDULED' },
+        });
+      }
 
-    await clearBlocks(prisma, {
-      userId: user.id,
-      range: { gte: weekStart, lte: weekEnd },
-    });
-
-    // Pass surviving blocks (completed or outside this week) so the
-    // scheduler respects them as occupied time.
-    const survivingBlocks = await prisma.timeBlock.findMany({
-      where: { userId: user.id },
-    });
-
-    slots = scheduleWeek(tasks, survivingBlocks, config, date);
-  } else {
-    // Clear non-completed blocks for the day, then schedule.
-    const dateStr = format(date, 'yyyy-MM-dd');
-    const targetDate = new Date(dateStr);
-
-    await clearBlocks(prisma, {
-      userId: user.id,
-      range: targetDate,
-    });
-
-    // Pass surviving blocks (completed today, or any other day) so the
-    // scheduler respects them as occupied time.
-    const survivingBlocks = await prisma.timeBlock.findMany({
-      where: { userId: user.id },
-    });
-
-    slots = scheduleDay(tasks, date, survivingBlocks, config);
-  }
-
-  // Create new blocks atomically with their task-status updates.
-  // createManyAndReturn (Prisma 5.14+) lets us batch the insert and still
-  // get back inserted rows. A unique-constraint failure on (userId, date,
-  // startHour) aborts the whole transaction — no orphan blocks.
-  const created = await prisma.$transaction(async (tx) => {
-    if (slots.length === 0) return [];
-
-    const blocks = await tx.timeBlock.createManyAndReturn({
-      data: slots.map((slot) => ({
-        date: new Date(slot.date),
-        startHour: slot.startHour,
-        durationMinutes: slot.durationMinutes,
-        title: slot.title,
-        company: slot.company,
-        taskType: slot.taskType as TaskType | null,
-        taskId: slot.taskId,
-        userId: user.id,
-      })),
-    });
-
-    const taskIds = slots.map((s) => s.taskId);
-    if (taskIds.length > 0) {
-      await tx.task.updateMany({
-        where: { id: { in: taskIds }, userId: user.id },
-        data: { status: 'SCHEDULED' },
-      });
-    }
-
-    return blocks;
-  });
+      return blocks;
+    },
+    // Scheduling can touch many rows; bump above the 5s default so a busy
+    // user with a full week doesn't time out mid-tx.
+    { timeout: 30_000 }
+  );
 
   // Generate insights
   const allTasks = await prisma.task.findMany({ where: { userId: user.id } });
