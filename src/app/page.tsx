@@ -7,6 +7,7 @@ import { QuickCapture } from '@/components/QuickCapture';
 import { CompanyTag, TaskTypeTag, ScoreBadge, StatusBadge, Modal, Spinner, EmptyState, SectionLabel } from '@/components/ui';
 import { COMPANY_DISPLAY, COMPANY_COLORS, TASK_TYPE_DISPLAY, HOURS } from '@/lib/constants';
 import { selectTop3 } from '@/lib/scoring';
+import { toLocalDateString } from '@/lib/local-date';
 import type { Company } from '@prisma/client';
 
 // ─────────────────────────────────────────────────────────
@@ -73,7 +74,10 @@ export default function DashboardPage() {
   };
 
   // Derived data
-  const todayStr = now.toISOString().split('T')[0];
+  // Use the user's local date — `block.date` is a calendar-date column whose
+  // JSON form encodes the stored calendar day, so a UTC `toISOString()` here
+  // would silently mis-bucket blocks late at night.
+  const todayStr = toLocalDateString(now);
   const todayBlocks = blocks.filter((b: any) => b.date?.split('T')[0] === todayStr).sort((a: any, b: any) => a.startHour - b.startHour);
   const carryovers = tasks.filter((t: any) => t.carryover);
   // Use the same top-3 selection as the scheduler/analytics so sidebar,
@@ -162,8 +166,7 @@ export default function DashboardPage() {
             </button>
             <button className="block w-full text-left px-3 py-2 bg-red-500/[0.08] border border-red-500/[0.15] rounded-md text-[12px] text-red-400/70 hover:text-red-400" onClick={async () => {
               if (confirm('Clear all unfinished blocks for today?')) {
-                const localToday = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in user's TZ
-                await fetch(`/api/blocks?date=${localToday}`, { method: 'DELETE' });
+                await fetch(`/api/blocks?date=${toLocalDateString()}`, { method: 'DELETE' });
                 refreshAll();
               }
             }}>
@@ -277,7 +280,7 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
   // don't snap back to 6am.
   const [dayStartHour, setDayStartHour] = useState(() => Math.max(currentHour, 6));
   const [calEvents, setCalEvents] = useState<any[]>([]);
-  const todayStr = now.toISOString().split('T')[0];
+  const todayStr = toLocalDateString(now);
   const buffersKey = `tb:today:buffers:${todayStr}`;
   const ignoredKey = `tb:today:ignoredEvents:${todayStr}`;
   const [buffers, setBuffers] = useState<Record<string, boolean>>(() => {
@@ -519,9 +522,9 @@ function WeekView({ now, blocks, tasks, onSelectTask }: any) {
       <h1 className="text-2xl font-bold tracking-tight mb-6">Week Overview</h1>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
         {weekDays.map((day) => {
-          const dateStr = day.toISOString().split('T')[0];
+          const dateStr = toLocalDateString(day);
           const dayBlocks = blocks.filter((b: any) => b.date?.split('T')[0] === dateStr);
-          const isToday = dateStr === today.toISOString().split('T')[0];
+          const isToday = dateStr === toLocalDateString(today);
 
           return (
             <div key={dateStr} className={`bg-white/[0.02] rounded-lg p-2.5 min-h-[120px] border ${isToday ? 'border-accent-red/30' : 'border-white/[0.05]'}`}>
