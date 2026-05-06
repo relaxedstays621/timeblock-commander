@@ -50,8 +50,14 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json();
   const { id, completed, actualMinutes } = body;
 
+  // Ownership check — refuse to mutate another user's block.
+  const existing = await prisma.timeBlock.findFirst({
+    where: { id, userId: user.id },
+  });
+  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
   const block = await prisma.timeBlock.update({
-    where: { id },
+    where: { id: existing.id },
     data: { completed: completed ?? true },
   });
 

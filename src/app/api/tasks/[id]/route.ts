@@ -42,6 +42,12 @@ export async function PATCH(
 
   const data = parsed.data;
 
+  // Ownership check — refuse to mutate another user's task.
+  const existing = await prisma.task.findFirst({
+    where: { id: params.id, userId: user.id },
+  });
+  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
   // Handle completion
   const completionData: any = {};
   if (data.status === 'COMPLETE') {
@@ -49,7 +55,7 @@ export async function PATCH(
   }
 
   const task = await prisma.task.update({
-    where: { id: params.id },
+    where: { id: existing.id },
     data: {
       ...data,
       ...completionData,
@@ -75,6 +81,11 @@ export async function DELETE(
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
-  await prisma.task.delete({ where: { id: params.id } });
+  const result = await prisma.task.deleteMany({
+    where: { id: params.id, userId: user.id },
+  });
+  if (result.count === 0) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
   return NextResponse.json({ deleted: true });
 }
