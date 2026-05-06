@@ -40,6 +40,40 @@ export const authOptions: NextAuthOptions = {
   },
 };
 
+// ─────────────────────────────────────────────────────────
+// AUTH RESOLUTION (no DB load)
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Returns the user id from the current NextAuth session, or null if there
+ * is no signed-in user. Does NOT consult the dev fallback and does NOT load
+ * the user row — that's deliberate, so callers that only need an id (e.g. to
+ * scope a query) don't pay for an extra round-trip and the fallback stays
+ * out of the auth path.
+ */
+export async function getSessionUserId(): Promise<string | null> {
+  const session = await getServerSession(authOptions);
+  return session?.user?.id ?? null;
+}
+
+// ─────────────────────────────────────────────────────────
+// USER LOAD (no auth fallback)
+// ─────────────────────────────────────────────────────────
+
+type LoadUserOptions = { includePreferences?: boolean };
+
+/**
+ * Loads a user row by id. No fallback, no auth resolution — just a DB read.
+ */
+export async function loadUser(userId: string, opts?: LoadUserOptions) {
+  const include = opts?.includePreferences ? { preferences: true } : undefined;
+  return prisma.user.findUnique({ where: { id: userId }, include });
+}
+
+// ─────────────────────────────────────────────────────────
+// COMPOSITE ENTRYPOINT (auth + load + dev fallback)
+// ─────────────────────────────────────────────────────────
+
 /**
  * Returns the current user for the request.
  *
@@ -53,15 +87,10 @@ export const authOptions: NextAuthOptions = {
  *
  * Optionally includes related data (preferences) when `opts.includePreferences` is true.
  */
-export async function getCurrentUser(opts?: { includePreferences?: boolean }) {
-  const include = opts?.includePreferences ? { preferences: true } : undefined;
-
-  const session = await getServerSession(authOptions);
-  if (session?.user?.id) {
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      include,
-    });
+export async function getCurrentUser(opts?: LoadUserOptions) {
+  const userId = await getSessionUserId();
+  if (userId) {
+    const user = await loadUser(userId, opts);
     if (user) return user;
   }
 
@@ -69,6 +98,7 @@ export async function getCurrentUser(opts?: { includePreferences?: boolean }) {
     process.env.NODE_ENV !== 'production' &&
     process.env.ALLOW_DEV_USER_FALLBACK === '1'
   ) {
+    const include = opts?.includePreferences ? { preferences: true } : undefined;
     return prisma.user.findFirst({
       where: { email: 'owner@timeblock.local' },
       include,

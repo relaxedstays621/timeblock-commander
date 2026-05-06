@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
+import { clearBlocks } from '@/lib/blocks';
 
 // GET /api/blocks?range=day|week|month&date=YYYY-MM-DD
 export async function GET(req: NextRequest) {
@@ -93,25 +94,10 @@ export async function DELETE(req: NextRequest) {
   }
   const targetDate = new Date(dateStr);
 
-  // Get blocks to find task IDs
-  const blocks = await prisma.timeBlock.findMany({
-    where: { userId: user.id, completed: false, date: targetDate },
+  const { cleared } = await clearBlocks(prisma, {
+    userId: user.id,
+    range: targetDate,
   });
 
-  const taskIds = blocks.filter(b => b.taskId).map(b => b.taskId) as string[];
-
-  // Delete blocks
-  const deleted = await prisma.timeBlock.deleteMany({
-    where: { userId: user.id, completed: false, date: targetDate },
-  });
-
-  // Reset task statuses
-  if (taskIds.length > 0) {
-    await prisma.task.updateMany({
-      where: { id: { in: taskIds }, status: { in: ['SCHEDULED', 'IN_PROGRESS'] } },
-      data: { status: 'QUEUED' },
-    });
-  }
-
-  return NextResponse.json({ cleared: deleted.count });
+  return NextResponse.json({ cleared });
 }

@@ -5,6 +5,7 @@ import { scheduleDay, scheduleWeek, rescheduleFromNow } from '@/lib/scheduler';
 import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } from '@/lib/scoring';
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
+import { clearBlocks } from '@/lib/blocks';
 import type { TaskType } from '@prisma/client';
 
 // POST /api/schedule
@@ -55,54 +56,31 @@ export async function POST(req: NextRequest) {
 
     slots = add;
   } else if (action === 'week') {
-    // Clear future non-completed blocks for THIS week only.
+    // Clear non-completed blocks for THIS week only, then schedule.
     const weekStart = startOfWeek(date, { weekStartsOn: 1 });
     const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
 
-    const blocksToDelete = await prisma.timeBlock.findMany({
-      where: {
-        userId: user.id,
-        completed: false,
-        date: { gte: weekStart, lte: weekEnd },
-      },
+    await clearBlocks(prisma, {
+      userId: user.id,
+      range: { gte: weekStart, lte: weekEnd },
     });
-    const taskIdsToReset = blocksToDelete.map(b => b.taskId).filter(Boolean) as string[];
-    await prisma.timeBlock.deleteMany({
-      where: { id: { in: blocksToDelete.map(b => b.id) } },
-    });
-    if (taskIdsToReset.length > 0) {
-      await prisma.task.updateMany({
-        where: { id: { in: taskIdsToReset }, status: { in: ['SCHEDULED', 'IN_PROGRESS'] } },
-        data: { status: 'QUEUED' },
-      });
-    }
 
     // Pass surviving blocks (completed or outside this week) so the
-    // scheduler respects them as occupied time. Without this, completed
-    // blocks today could collide with newly-scheduled ones.
+    // scheduler respects them as occupied time.
     const survivingBlocks = await prisma.timeBlock.findMany({
       where: { userId: user.id },
     });
 
     slots = scheduleWeek(tasks, survivingBlocks, config, date);
   } else {
-    // Clear ALL non-completed blocks for the day
+    // Clear non-completed blocks for the day, then schedule.
     const dateStr = format(date, 'yyyy-MM-dd');
-    // Reset any SCHEDULED tasks back to QUEUED
-    const dayBlocks = await prisma.timeBlock.findMany({
-      where: { userId: user.id, date: new Date(dateStr) },
+    const targetDate = new Date(dateStr);
+
+    await clearBlocks(prisma, {
+      userId: user.id,
+      range: targetDate,
     });
-    const taskIdsToReset = dayBlocks.filter(b => !b.completed && b.taskId).map(b => b.taskId) as string[];
-    // Delete all non-completed blocks
-    await prisma.timeBlock.deleteMany({
-      where: { userId: user.id, completed: false, date: new Date(dateStr) },
-    });
-    if (taskIdsToReset.length > 0) {
-      await prisma.task.updateMany({
-        where: { id: { in: taskIdsToReset }, status: { in: ['SCHEDULED', 'IN_PROGRESS'] } },
-        data: { status: 'QUEUED' },
-      });
-    }
 
     // Pass surviving blocks (completed today, or any other day) so the
     // scheduler respects them as occupied time.
