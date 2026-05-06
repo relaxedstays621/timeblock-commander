@@ -7,16 +7,9 @@ import {
   updateEvent,
 } from '@/lib/google-calendar';
 import { format, startOfDay, endOfDay } from 'date-fns';
+import { resolveTimezone, zonedDayBoundsToUTC } from '@/lib/timezone';
 import type { Company } from '@prisma/client';
 import type { calendar_v3 } from 'googleapis';
-
-/**
- * Resolves the IANA timezone for an event payload. Prefers the user's stored
- * preference, falls back to the server's TZ env var, and finally to UTC.
- */
-function resolveTimezone(prefs: { timezone?: string | null } | null | undefined): string {
-  return prefs?.timezone || process.env.TZ || 'UTC';
-}
 
 /**
  * Format a stored block as a Google Calendar wall-clock event in the user's
@@ -101,8 +94,11 @@ export async function GET(req: NextRequest) {
         prefs?.calendarPersonal,
       ].filter(Boolean).flatMap((id: string) => id.split(','));
 
-      const dayStart = new Date(dateStr + 'T00:00:00');
-      const dayEnd = new Date(dateStr + 'T23:59:59');
+      // Scope the day window to the user's IANA timezone so the events
+      // returned match the calendar day the user clicked on (matches what
+      // POST sync does with stored blocks).
+      const tz = resolveTimezone(prefs);
+      const { start: dayStart, end: dayEnd } = zonedDayBoundsToUTC(dateStr, tz);
 
       const { listEvents } = await import('@/lib/google-calendar');
       const allEvents: any[] = [];
