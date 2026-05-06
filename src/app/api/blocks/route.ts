@@ -76,24 +76,33 @@ export async function PATCH(req: NextRequest) {
   return NextResponse.json(block);
 }
 
-// DELETE /api/blocks — clear today's non-completed blocks
+// DELETE /api/blocks?date=YYYY-MM-DD — clear that day's non-completed blocks.
+// The date must come from the client (which knows its local timezone) so a
+// late-evening click clears the user's local "today", not the server's.
 export async function DELETE(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const { searchParams } = new URL(req.url);
+  const dateStr = searchParams.get('date');
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return NextResponse.json(
+      { error: 'date query parameter is required (YYYY-MM-DD)' },
+      { status: 400 }
+    );
+  }
+  const targetDate = new Date(dateStr);
 
   // Get blocks to find task IDs
   const blocks = await prisma.timeBlock.findMany({
-    where: { userId: user.id, completed: false, date: today },
+    where: { userId: user.id, completed: false, date: targetDate },
   });
 
   const taskIds = blocks.filter(b => b.taskId).map(b => b.taskId) as string[];
 
   // Delete blocks
   const deleted = await prisma.timeBlock.deleteMany({
-    where: { userId: user.id, completed: false, date: today },
+    where: { userId: user.id, completed: false, date: targetDate },
   });
 
   // Reset task statuses

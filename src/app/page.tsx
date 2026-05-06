@@ -126,7 +126,8 @@ export default function DashboardPage() {
             </button>
             <button className="block w-full text-left px-3 py-2 bg-red-500/[0.08] border border-red-500/[0.15] rounded-md text-[12px] text-red-400/70 hover:text-red-400" onClick={async () => {
               if (confirm('Clear all unfinished blocks for today?')) {
-                await fetch('/api/blocks', { method: 'DELETE' });
+                const localToday = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in user's TZ
+                await fetch(`/api/blocks?date=${localToday}`, { method: 'DELETE' });
                 refreshAll();
               }
             }}>

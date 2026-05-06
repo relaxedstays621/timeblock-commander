@@ -11,6 +11,50 @@ import type { Company } from '@prisma/client';
 import type { calendar_v3 } from 'googleapis';
 
 /**
+ * Resolves the IANA timezone for an event payload. Prefers the user's stored
+ * preference, falls back to the server's TZ env var, and finally to UTC.
+ */
+function resolveTimezone(prefs: { timezone?: string | null } | null | undefined): string {
+  return prefs?.timezone || process.env.TZ || 'UTC';
+}
+
+/**
+ * Format a stored block as a Google Calendar wall-clock event in the user's
+ * timezone. block.date is a DATE (midnight UTC); we extract its UTC y/m/d to
+ * recover the calendar date the user intended, then build "YYYY-MM-DDTHH:MM:00"
+ * and let Google interpret it under `timeZone`.
+ */
+function buildEventTimes(
+  block: { date: Date; startHour: number; durationMinutes: number },
+  timeZone: string
+): { start: calendar_v3.Schema$EventDateTime; end: calendar_v3.Schema$EventDateTime } {
+  const y = block.date.getUTCFullYear();
+  const m = String(block.date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(block.date.getUTCDate()).padStart(2, '0');
+  const startHH = String(block.startHour).padStart(2, '0');
+
+  // Compute end as start + duration, rolling over hours within the day. We
+  // build a Date in UTC just to do arithmetic, then re-format the components.
+  const startTotalMin = block.startHour * 60;
+  const endTotalMin = startTotalMin + block.durationMinutes;
+  const endHour = Math.floor(endTotalMin / 60);
+  const endMin = endTotalMin % 60;
+
+  // If duration spills past 24:00 we'd need to advance the date — clamp to
+  // 23:59 so we never silently produce an event on the wrong day.
+  const safeEndHour = Math.min(endHour, 23);
+  const safeEndMin = endHour > 23 ? 59 : endMin;
+
+  const startStr = `${y}-${m}-${d}T${startHH}:00:00`;
+  const endStr = `${y}-${m}-${d}T${String(safeEndHour).padStart(2, '0')}:${String(safeEndMin).padStart(2, '0')}:00`;
+
+  return {
+    start: { dateTime: startStr, timeZone },
+    end: { dateTime: endStr, timeZone },
+  };
+}
+
+/**
  * Returns the calendar ID to use for a given company, based on the user's
  * preferences. Falls back to the Google "primary" calendar.
  */
@@ -110,7 +154,9 @@ export async function POST(req: NextRequest) {
   const dayStart = startOfDay(date);
   const dayEnd = endOfDay(date);
 
-  const prefs = (user as any).preferences as Parameters<typeof calendarIdForCompany>[1];
+  const prefs = (user as any).preferences as
+    | (Parameters<typeof calendarIdForCompany>[1] & { timezone?: string | null })
+    | null;
 
   const blocks = await prisma.timeBlock.findMany({
     where: {
@@ -127,22 +173,22 @@ export async function POST(req: NextRequest) {
     error?: string;
   }> = [];
 
+  const timeZone = resolveTimezone(prefs);
+
   for (const block of blocks) {
     const calendarId = calendarIdForCompany(block.company, prefs);
 
-    // Construct start/end from block.date + startHour + durationMinutes.
-    // block.date is stored as a DATE, so we build the local wall-clock time.
-    const start = new Date(block.date);
-    start.setHours(block.startHour, 0, 0, 0);
-    const end = new Date(start.getTime() + block.durationMinutes * 60_000);
+    // Build start/end as wall-clock times in the user's timezone so a
+    // 10:00 block becomes 10:00 in their TZ regardless of server TZ.
+    const { start, end } = buildEventTimes(block, timeZone);
 
     const event: calendar_v3.Schema$Event = {
       summary: block.title,
       description: `TimeBlock Commander — ${block.company}${
         block.taskType ? ` / ${block.taskType}` : ''
       }`,
-      start: { dateTime: start.toISOString() },
-      end: { dateTime: end.toISOString() },
+      start,
+      end,
     };
 
     try {

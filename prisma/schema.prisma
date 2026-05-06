@@ -191,6 +191,11 @@ model UserPreferences {
   workDays          Int[]  @default([1, 2, 3, 4, 5]) // 0=Sun, 1=Mon...
   defaultDuration   Int    @default(60)  // minutes
 
+  // IANA timezone, e.g. "America/New_York". When null, falls back to the
+  // server's TZ env var. Required for correct Google Calendar sync and for
+  // resolving the user's local "today".
+  timezone          String?
+
   // Calendar IDs per company (Phase 2)
   calendarAperture  String?
   calendarRentals   String?
