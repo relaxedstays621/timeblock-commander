@@ -5,6 +5,7 @@ import { scheduleDay, scheduleWeek, rescheduleFromNow } from '@/lib/scheduler';
 import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } from '@/lib/scoring';
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
+import type { TaskType } from '@prisma/client';
 
 // POST /api/schedule
 // body: { action: "day" | "week" | "reschedule", date?: string }
@@ -112,29 +113,36 @@ export async function POST(req: NextRequest) {
     slots = scheduleDay(tasks, date, survivingBlocks, config);
   }
 
-  // Create new blocks
-  const created = [];
-  for (const slot of slots) {
-    const block = await prisma.timeBlock.create({
-      data: {
+  // Create new blocks atomically with their task-status updates.
+  // createManyAndReturn (Prisma 5.14+) lets us batch the insert and still
+  // get back inserted rows. A unique-constraint failure on (userId, date,
+  // startHour) aborts the whole transaction — no orphan blocks.
+  const created = await prisma.$transaction(async (tx) => {
+    if (slots.length === 0) return [];
+
+    const blocks = await tx.timeBlock.createManyAndReturn({
+      data: slots.map((slot) => ({
         date: new Date(slot.date),
         startHour: slot.startHour,
         durationMinutes: slot.durationMinutes,
         title: slot.title,
         company: slot.company,
-        taskType: slot.taskType as any,
+        taskType: slot.taskType as TaskType | null,
         taskId: slot.taskId,
         userId: user.id,
-      },
+      })),
     });
-    created.push(block);
 
-    // Update task status to SCHEDULED
-    await prisma.task.update({
-      where: { id: slot.taskId },
-      data: { status: 'SCHEDULED' },
-    });
-  }
+    const taskIds = slots.map((s) => s.taskId);
+    if (taskIds.length > 0) {
+      await tx.task.updateMany({
+        where: { id: { in: taskIds }, userId: user.id },
+        data: { status: 'SCHEDULED' },
+      });
+    }
+
+    return blocks;
+  });
 
   // Generate insights
   const allTasks = await prisma.task.findMany({ where: { userId: user.id } });
