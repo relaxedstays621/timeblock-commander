@@ -48,26 +48,38 @@ export async function PATCH(
   });
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  // Handle completion
-  const completionData: any = {};
-  if (data.status === 'COMPLETE') {
-    completionData.completedAt = new Date();
+  // Handle status transitions around completion.
+  const completionData: { completedAt?: Date | null } = {};
+  if (data.status !== undefined) {
+    if (data.status === 'COMPLETE') {
+      completionData.completedAt = new Date();
+    } else if (existing.status === 'COMPLETE') {
+      // Reopening: clear completedAt so it doesn't keep a stale timestamp.
+      completionData.completedAt = null;
+    }
   }
 
-  const task = await prisma.task.update({
+  // dueDate: undefined = leave alone, null = clear, string = set.
+  const dueDate =
+    data.dueDate === undefined ? undefined : data.dueDate === null ? null : new Date(data.dueDate);
+
+  // Compute the post-update task in memory so we can score and write in one go.
+  const merged = {
+    ...existing,
+    ...data,
+    ...completionData,
+    dueDate: dueDate === undefined ? existing.dueDate : dueDate,
+  } as typeof existing;
+  const score = calculateScore(merged);
+
+  const updated = await prisma.task.update({
     where: { id: existing.id },
     data: {
       ...data,
       ...completionData,
-      dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+      dueDate,
+      compositeScore: score,
     },
-  });
-
-  // Recalculate score
-  const score = calculateScore(task);
-  const updated = await prisma.task.update({
-    where: { id: task.id },
-    data: { compositeScore: score },
   });
 
   return NextResponse.json(updated);

@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { CreateTaskSchema, UpdateTaskSchema } from '@/lib/schemas';
+import { CreateTaskSchema } from '@/lib/schemas';
 import { calculateScore } from '@/lib/scoring';
 import { getCurrentUser } from '@/lib/auth';
+import type { Task } from '@prisma/client';
 
 // GET /api/tasks — list tasks with optional filters
 export async function GET(req: NextRequest) {
@@ -44,22 +45,28 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data;
+  const dueDate = data.dueDate ? new Date(data.dueDate) : null;
 
-  // Create task
+  // Score depends only on validated input + defaults; compute it before
+  // the insert so we don't need a follow-up update.
+  const score = calculateScore({
+    priority: data.priority,
+    urgency: data.urgency,
+    isStrategic: data.isStrategic,
+    isReactive: data.isReactive,
+    carryover: false,
+    carryoverCount: 0,
+    dueDate,
+  } as Task);
+
   const task = await prisma.task.create({
     data: {
       ...data,
-      dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+      dueDate,
+      compositeScore: score,
       userId: user.id,
     },
   });
 
-  // Calculate and store composite score
-  const score = calculateScore(task);
-  const updated = await prisma.task.update({
-    where: { id: task.id },
-    data: { compositeScore: score },
-  });
-
-  return NextResponse.json(updated, { status: 201 });
+  return NextResponse.json(task, { status: 201 });
 }

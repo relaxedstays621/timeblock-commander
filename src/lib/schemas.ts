@@ -39,7 +39,7 @@ export const CreateTaskSchema = z.object({
   priority: z.number().int().min(1).max(10).default(5),
   urgency: z.number().int().min(1).max(10).default(5),
   estimatedMinutes: z.number().int().min(5).max(480).default(60),
-  dueDate: z.string().datetime().optional(),
+  dueDate: z.string().datetime().nullable().optional(),
   recurrence: z.string().max(50).optional(),
   energyLevel: EnergyLevelEnum.default('MEDIUM'),
   status: TaskStatusEnum.default('BACKLOG'),
@@ -50,7 +50,7 @@ export const CreateTaskSchema = z.object({
 
 export const UpdateTaskSchema = CreateTaskSchema.partial().extend({
   carryover: z.boolean().optional(),
-  completedAt: z.string().datetime().optional(),
+  completedAt: z.string().datetime().nullable().optional(),
 });
 
 export const QuickCaptureSchema = z.object({
