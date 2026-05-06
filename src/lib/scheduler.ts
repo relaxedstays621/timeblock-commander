@@ -1,6 +1,6 @@
 import { Task, TimeBlock, Company, EnergyLevel, TaskStatus } from '@prisma/client';
 import { calculateScore } from './scoring';
-import { format, addDays, startOfWeek } from 'date-fns';
+import { format, addDays, startOfWeek, startOfDay } from 'date-fns';
 
 // ─────────────────────────────────────────────────────────
 // SCHEDULER CONFIGURATION
@@ -155,6 +155,7 @@ export function scheduleWeek(
   startDate?: Date
 ): ScheduleSlot[] {
   const weekStart = startDate || startOfWeek(new Date(), { weekStartsOn: 1 });
+  const todayStart = startOfDay(new Date());
   const allSlots: ScheduleSlot[] = [];
   const scheduledTaskIds = new Set<string>();
 
@@ -167,6 +168,10 @@ export function scheduleWeek(
   // Distribute tasks across work days
   for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
     const date = addDays(weekStart, dayOffset);
+
+    // Never place blocks in the past — skip days strictly before today.
+    if (startOfDay(date) < todayStart) continue;
+
     const dayOfWeek = date.getDay();
 
     if (!config.workDays.includes(dayOfWeek)) continue;

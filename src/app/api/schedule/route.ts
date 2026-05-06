@@ -3,8 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { scheduleDay, scheduleWeek, rescheduleFromNow } from '@/lib/scheduler';
 import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } from '@/lib/scoring';
-import { format, parseISO } from 'date-fns';
-import { createEvent } from '@/lib/google-calendar';
+import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
 
 // POST /api/schedule
@@ -55,12 +54,15 @@ export async function POST(req: NextRequest) {
 
     slots = add;
   } else if (action === 'week') {
-    // Clear future non-completed blocks for the week
+    // Clear future non-completed blocks for THIS week only.
+    const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+    const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
+
     const blocksToDelete = await prisma.timeBlock.findMany({
       where: {
         userId: user.id,
         completed: false,
-        date: { gte: date },
+        date: { gte: weekStart, lte: weekEnd },
       },
     });
     const taskIdsToReset = blocksToDelete.map(b => b.taskId).filter(Boolean) as string[];
@@ -69,12 +71,19 @@ export async function POST(req: NextRequest) {
     });
     if (taskIdsToReset.length > 0) {
       await prisma.task.updateMany({
-        where: { id: { in: taskIdsToReset }, status: 'SCHEDULED' },
+        where: { id: { in: taskIdsToReset }, status: { in: ['SCHEDULED', 'IN_PROGRESS'] } },
         data: { status: 'QUEUED' },
       });
     }
 
-    slots = scheduleWeek(tasks, [], config, date);
+    // Pass surviving blocks (completed or outside this week) so the
+    // scheduler respects them as occupied time. Without this, completed
+    // blocks today could collide with newly-scheduled ones.
+    const survivingBlocks = await prisma.timeBlock.findMany({
+      where: { userId: user.id },
+    });
+
+    slots = scheduleWeek(tasks, survivingBlocks, config, date);
   } else {
     // Clear ALL non-completed blocks for the day
     const dateStr = format(date, 'yyyy-MM-dd');
@@ -94,7 +103,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    slots = scheduleDay(tasks, date, [], config);
+    // Pass surviving blocks (completed today, or any other day) so the
+    // scheduler respects them as occupied time.
+    const survivingBlocks = await prisma.timeBlock.findMany({
+      where: { userId: user.id },
+    });
+
+    slots = scheduleDay(tasks, date, survivingBlocks, config);
   }
 
   // Create new blocks
