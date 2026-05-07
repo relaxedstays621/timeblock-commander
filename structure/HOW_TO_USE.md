@@ -117,3 +117,9 @@ Summarize changed files, verification, risks, and next action.
 ```
 
 Then send the handoff to an audit model using the example in `Purpose/examples/dev-audit-loop.md`.
+
+For longer-running work, use the active surfaces under `Purpose/`:
+
+- `scope.md` — write a session-level scope when the work spans more than one task.
+- `checklists/` — copy `_template.md` to `<task-slug>.md` and walk it to declare done. Move to `done/` after acceptance.
+- `session-handoffs/` — write a dated handoff at session end so the next session can resume.

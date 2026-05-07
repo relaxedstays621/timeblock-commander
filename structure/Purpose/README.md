@@ -12,6 +12,9 @@ Use `boot-protocol.md` for the role-selection process.
 Use `control-plane.md` for model-to-role assignment and swapping.
 Use `delegation-contract.md` for task packets, handoffs, and done criteria.
 Use `roles.md` for the role registry.
+Use `scope.md` for a session-level scope contract beyond the inline task `Scope:` field.
+Use `session-handoffs/` to carry state across conversation contexts.
+Use `checklists/` to drive done verification per active task.
 Use `User_Guide/` for procedures after orientation.
 Use `Development/` for building or changing the project.
 
@@ -84,6 +87,12 @@ For role selection:
 - `control-plane.md`
 - `delegation-contract.md`
 - `roles.md`
+
+For active work surfaces:
+
+- `scope.md`
+- `session-handoffs/`
+- `checklists/`
 
 For project procedures:
 

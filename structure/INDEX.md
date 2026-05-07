@@ -16,6 +16,9 @@ If the goal is fast role alignment for a model or operator, start with `Purpose/
 - `Purpose/control-plane.md` — model-to-role assignment and swapping
 - `Purpose/delegation-contract.md` — task packets, handoffs, and done criteria
 - `Purpose/roles.md` — two-role registry for Development Agent and Audit Agent
+- `Purpose/scope.md` — standalone scope contract for a session or task
+- `Purpose/session-handoffs/` — rolling record of state across sessions
+- `Purpose/checklists/` — boxed verification lists per active task
 - `Purpose/examples/dev-audit-loop.md` — worked example of the development-to-audit loop
 
 ## Default Project Layers

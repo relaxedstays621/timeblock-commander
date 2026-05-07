@@ -18,7 +18,9 @@ These contracts are session-specific.
 
 A task delegation packet, boot declaration, handoff artifact, and any in-session assignment are scoped to the current conversation context. They do not persist automatically across sessions.
 
-If a task spans sessions, the operator is responsible for carrying forward the relevant handoff artifact into the next session. The incoming agent should treat the carried artifact as its starting state, not assume continuity from a prior context it cannot read.
+If a task spans sessions, write a session handoff in `session-handoffs/` at session end. The incoming agent reads the newest file there and treats it as its starting state.
+
+For a session-level scope contract that outlives any single task, write `scope.md`. For done verification, use `checklists/`.
 
 ## Required Boot Declaration
 
