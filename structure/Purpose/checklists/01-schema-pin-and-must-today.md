@@ -26,7 +26,8 @@ Owner: matthewb621@gmail.com
 ## Task-specific verification
 
 - [ ] `prisma/schema.prisma` Task model has `userPinned Boolean @default(false)` and `mustBeDoneToday Boolean @default(false)`
-- [ ] migration file generated and committed
+- [ ] equivalent SQL produced via `npx prisma migrate diff --from-schema-datamodel <prev> --to-schema-datamodel prisma/schema.prisma --script` and reviewed in the audit handoff
+- [ ] deployment plan documented: applied via `npm run db:push` on the host (this repo uses db push, not committed migrations; see scope decision)
 - [ ] `npx prisma generate` succeeds
 - [ ] type imports across `src/lib/` still compile (`tsc --noEmit`)
 - [ ] no existing `calculateScore` callers break (boolean fields default to false, score unchanged for legacy rows)

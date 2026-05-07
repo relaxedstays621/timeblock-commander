@@ -13,20 +13,20 @@ datasource db {
 // ─────────────────────────────────────────────────────────
 
 model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
+  id                       String  @id @default(cuid())
+  userId                   String
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String? @db.Text
+  access_token             String? @db.Text
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String? @db.Text
+  session_state            String?
   refresh_token_expires_in Int?
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
@@ -40,9 +40,9 @@ model Session {
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String           @id @default(cuid())
   name          String?
-  email         String?   @unique
+  email         String?          @unique
   emailVerified DateTime?
   image         String?
   accounts      Account[]
@@ -51,7 +51,7 @@ model User {
   blocks        TimeBlock[]
   goals         WeeklyGoal[]
   preferences   UserPreferences?
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime         @default(now())
 }
 
 model VerificationToken {
@@ -111,31 +111,33 @@ model Task {
   title            String
   description      String?     @db.Text
   company          Company
-  taskType         TaskType?   // null for Personal
-  priority         Int         @default(5)  // 1-10
-  urgency          Int         @default(5)  // 1-10
-  compositeScore   Int         @default(0)  // calculated
+  taskType         TaskType? // null for Personal
+  priority         Int         @default(5) // 1-10
+  urgency          Int         @default(5) // 1-10
+  compositeScore   Int         @default(0) // calculated
   estimatedMinutes Int         @default(60)
   actualMinutes    Int?
   dueDate          DateTime?
-  recurrence       String?     // "daily", "weekly", "monthly", cron
+  recurrence       String? // "daily", "weekly", "monthly", cron
   energyLevel      EnergyLevel @default(MEDIUM)
   status           TaskStatus  @default(BACKLOG)
   carryover        Boolean     @default(false)
-  carryoverCount   Int         @default(0)  // how many weeks carried
+  carryoverCount   Int         @default(0) // how many weeks carried
   source           TaskSource  @default(QUICK_CAPTURE)
   isStrategic      Boolean     @default(false)
   isReactive       Boolean     @default(false)
+  userPinned       Boolean     @default(false) // pin → forces composite score to 100
+  mustBeDoneToday  Boolean     @default(false) // schedule today; prefers non-prime hours
   completedAt      DateTime?
-  weekNumber       Int?        // ISO week assigned
-  yearNumber       Int?        // year assigned
+  weekNumber       Int? // ISO week assigned
+  yearNumber       Int? // year assigned
 
-  userId           String
-  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  blocks           TimeBlock[]
+  userId String
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  blocks TimeBlock[]
 
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId, status])
   @@index([userId, company])
@@ -143,65 +145,65 @@ model Task {
 }
 
 model TimeBlock {
-  id               String    @id @default(cuid())
-  date             DateTime  @db.Date
-  startHour        Int       // 0-23
-  durationMinutes  Int       @default(60)
-  title            String    // denormalized for calendar display
-  company          Company
-  taskType         TaskType?
-  completed        Boolean   @default(false)
-  gcalEventId      String?   // Google Calendar event ID for sync
+  id              String    @id @default(cuid())
+  date            DateTime  @db.Date
+  startHour       Int // 0-23
+  durationMinutes Int       @default(60)
+  title           String // denormalized for calendar display
+  company         Company
+  taskType        TaskType?
+  completed       Boolean   @default(false)
+  gcalEventId     String? // Google Calendar event ID for sync
 
-  taskId           String?
-  task             Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  userId           String
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskId String?
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  userId String
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@index([userId, date])
   @@unique([userId, date, startHour]) // one block per hour slot
+  @@index([userId, date])
 }
 
 model WeeklyGoal {
   id          String   @id @default(cuid())
-  weekNumber  Int      // ISO week
+  weekNumber  Int // ISO week
   yearNumber  Int
-  goals       String   @db.Text  // free text goals
+  goals       String   @db.Text // free text goals
   top3TaskIds String[] // task IDs for the week's top 3
   reviewed    Boolean  @default(false)
 
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([userId, weekNumber, yearNumber])
 }
 
 model UserPreferences {
-  id                String @id @default(cuid())
-  primeHoursStart   Int    @default(8)   // 24h format
-  primeHoursEnd     Int    @default(12)
-  maxDailyHours     Int    @default(10)
-  breakMinutes      Int    @default(15)
-  workDays          Int[]  @default([1, 2, 3, 4, 5]) // 0=Sun, 1=Mon...
-  defaultDuration   Int    @default(60)  // minutes
+  id              String @id @default(cuid())
+  primeHoursStart Int    @default(8) // 24h format
+  primeHoursEnd   Int    @default(12)
+  maxDailyHours   Int    @default(10)
+  breakMinutes    Int    @default(15)
+  workDays        Int[]  @default([1, 2, 3, 4, 5]) // 0=Sun, 1=Mon...
+  defaultDuration Int    @default(60) // minutes
 
   // IANA timezone, e.g. "America/New_York". When null, falls back to the
   // server's TZ env var. Required for correct Google Calendar sync and for
   // resolving the user's local "today".
-  timezone          String?
+  timezone String?
 
   // Calendar IDs per company (Phase 2)
-  calendarAperture  String?
-  calendarRentals   String?
-  calendarDiyp      String?
-  calendarPersonal  String?
+  calendarAperture String?
+  calendarRentals  String?
+  calendarDiyp     String?
+  calendarPersonal String?
 
-  userId            String @unique
-  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
