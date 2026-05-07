@@ -54,7 +54,7 @@ This table is the current routing map. It can be changed without changing the ro
 
 | Role | Assigned model | Fallback model | Notes |
 | --- | --- | --- | --- |
-| Development Agent | `<fill per project>` | optional | Implementation, documentation, scoped edits |
+| Development Agent | `claude-opus-4-7` | optional | Implementation, documentation, scoped edits |
 | Audit Agent | `<fill per project>` | optional | Review, verification, findings, evidence checks |
 
 The table is the routing control surface. Swap models here for persistent routing changes.
