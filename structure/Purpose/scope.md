@@ -1,6 +1,8 @@
 # Scope
 
-Standalone scope contract for a session or task.
+Standalone scope contract for a **session or task**. Not the project.
+
+Project-level scope lives in `../System Guide/architecture.md` under the `Boundary` section. That file says what TimeBlock Commander is and is not. This file is one level narrower: it constrains a single session or task inside that project boundary.
 
 The task packet in `delegation-contract.md` carries an inline `Scope:` field for one-line use. This file is the longer form: write it once, and let multiple tasks inside a session inherit it.
 
@@ -17,13 +19,13 @@ For a single self-contained task, the inline `Scope:` field in the task packet i
 
 ## Authority
 
-A scope written here is the contract. Tasks within the session reference it. Agents do not widen it without explicit reassignment from the operator.
+A scope written here is the contract for the active session or task. It must sit inside the project boundary defined in `../System Guide/architecture.md`. Tasks within the session reference it. Agents do not widen it without explicit reassignment from the operator.
 
-If a task needs work outside the scope, the agent should:
+If a task needs work outside the session/task scope, the agent should:
 
 1. Stop.
-2. Name the boundary crossing.
-3. Ask the operator to widen the scope, or split the work into a separate task with its own scope.
+2. Name the boundary crossing — and whether it is a session-scope crossing or a project-boundary crossing.
+3. Ask the operator to widen the scope (or, for a project-boundary crossing, decide whether the work belongs in this project at all), or split the work into a separate task with its own scope.
 
 ## Template
 
@@ -47,7 +49,10 @@ Owner:
 <Operator or stakeholder responsible for accepting the work.>
 
 Effective for:
-<this task | current session | project default>
+<this task | current session>
+
+Project boundary reference:
+../System Guide/architecture.md (Boundary section)
 
 Verification source:
 <Pointer to the checklist file under checklists/, if one exists.>

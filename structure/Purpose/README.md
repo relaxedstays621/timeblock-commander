@@ -90,9 +90,13 @@ For role selection:
 
 For active work surfaces:
 
-- `scope.md`
+- `scope.md` (session or task scope only — narrower than the project boundary)
 - `session-handoffs/`
 - `checklists/`
+
+For project-level boundary:
+
+- `../System Guide/architecture.md` (Boundary section)
 
 For project procedures:
 

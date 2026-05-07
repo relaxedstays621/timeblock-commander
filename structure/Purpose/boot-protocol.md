@@ -10,7 +10,7 @@ Use this protocol when an LLM is routed into a project and needs to find its pur
 4. Read `structure/Purpose/roles.md`.
 5. If the model has an optional profile under `structure/Purpose/agents/`, read it as a default preference, not as a hard role assignment.
 6. If `structure/Purpose/session-handoffs/` contains files, read the newest one. Treat it as the starting state from the prior session, not as a replacement for this protocol.
-7. If `structure/Purpose/scope.md` is filled in, read it as the active scope contract.
+7. Read `structure/System Guide/architecture.md` for the project-level boundary. If `structure/Purpose/scope.md` is filled in, read it as the narrower session-or-task scope contract on top of that boundary.
 8. If a checklist for the current task exists under `structure/Purpose/checklists/`, read it as the done criteria.
 9. Read only the next folder needed for the selected role.
 
