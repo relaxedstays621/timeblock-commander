@@ -6,6 +6,8 @@ import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } fro
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
 import { clearBlocks } from '@/lib/blocks';
+import { resolveTimezone } from '@/lib/timezone';
+import { toLocalDateString } from '@/lib/local-date';
 import type { TaskType } from '@prisma/client';
 
 // POST /api/schedule
@@ -29,28 +31,77 @@ export async function POST(req: NextRequest) {
     workDays: prefs?.workDays ?? [1, 2, 3, 4, 5],
   };
 
-  // Get all active tasks
-  const tasks = await prisma.task.findMany({
-    where: {
-      userId: user.id,
-      status: { in: ['QUEUED', 'BACKLOG', 'SCHEDULED'] },
-    },
-  });
-
-  // Get existing blocks
-  const existingBlocks = await prisma.timeBlock.findMany({
-    where: { userId: user.id },
-  });
-
   // Wrap the entire pre-clear + plan + insert + status-update in one
   // interactive transaction so a failed insert (e.g. unique-constraint on
   // (userId, date, startHour)) rolls the clear back instead of leaving the
   // user with a wiped calendar and no replacement.
   const created = await prisma.$transaction(
     async (tx) => {
+      // Stale-scheduled sweep — runs before every branch.
+      //
+      // A task is "stale-scheduled" when it has linked blocks but every
+      // single one of those blocks is stale: the block's date is strictly
+      // before today (in the user's local timezone) or the block has been
+      // marked completed. Such a task has no live plan; its place on the
+      // calendar has elapsed without being executed. The downstream
+      // planner's filter would otherwise treat these as already scheduled
+      // and skip them, leaving the user unable to re-place them via
+      // Schedule Week / Schedule Day.
+      //
+      // We deliberately do NOT key off the literal Task.status === 'SCHEDULED'
+      // value — the status enum is being refactored and this predicate
+      // should survive the rename. Excluding tasks whose `completedAt` is
+      // already set keeps us from resurrecting genuinely finished work.
+      const userTz = resolveTimezone(prefs);
+      const todayLocalStr = toLocalDateString(new Date(), userTz);
+      // todayStart = midnight UTC of the user's local calendar day. Block
+      // dates are @db.Date (midnight UTC of the stored day), so a strict
+      // `< todayStart` correctly classifies "yesterday or earlier" as past.
+      const todayStart = new Date(todayLocalStr);
+
+      const staleScheduled = await tx.task.findMany({
+        where: {
+          userId: user.id,
+          completedAt: null,
+          blocks: {
+            some: {},                                 // has at least one block
+            none: { completed: false, date: { gte: todayStart } }, // no live block
+          },
+        },
+        select: { id: true, blocks: { select: { id: true } } },
+      });
+
+      if (staleScheduled.length > 0) {
+        const staleTaskIds = staleScheduled.map((t) => t.id);
+        const staleBlockIds = staleScheduled.flatMap((t) => t.blocks).map((b) => b.id);
+
+        if (staleBlockIds.length > 0) {
+          await tx.timeBlock.deleteMany({
+            where: { id: { in: staleBlockIds }, userId: user.id },
+          });
+        }
+        await tx.task.updateMany({
+          where: { id: { in: staleTaskIds }, userId: user.id },
+          data: { status: 'QUEUED' },
+        });
+      }
+
       let slots;
 
       if (action === 'reschedule') {
+        // Fetch tasks and blocks INSIDE the tx, after the sweep, so we
+        // observe the post-sweep state. This is what makes the sweep
+        // actually take effect for the reschedule path.
+        const tasks = await tx.task.findMany({
+          where: {
+            userId: user.id,
+            status: { in: ['QUEUED', 'BACKLOG', 'SCHEDULED'] },
+          },
+        });
+        const existingBlocks = await tx.timeBlock.findMany({
+          where: { userId: user.id },
+        });
+
         const { remove, add } = rescheduleFromNow(tasks, existingBlocks, config);
         if (remove.length > 0) {
           await tx.timeBlock.deleteMany({
@@ -67,11 +118,10 @@ export async function POST(req: NextRequest) {
           range: { gte: weekStart, lte: weekEnd },
         });
 
-        // Refetch tasks AFTER clearBlocks so we observe the post-reset
-        // statuses. Anything that was SCHEDULED with a block in this week
-        // has just been flipped to QUEUED in-DB, but the outer `tasks`
-        // snapshot still reads SCHEDULED — and scheduleWeek's filter would
-        // then drop every one of them, producing an empty plan.
+        // Fetch tasks AFTER both the sweep and clearBlocks so the planner
+        // observes the fully-reset state. A snapshot taken any earlier
+        // would still report tasks that just had their blocks deleted as
+        // SCHEDULED, and scheduleWeek's filter would drop them.
         const freshTasks = await tx.task.findMany({
           where: {
             userId: user.id,
@@ -93,8 +143,8 @@ export async function POST(req: NextRequest) {
           range: targetDate,
         });
 
-        // See note in the 'week' branch — refetch tasks post-clear so the
-        // planner sees QUEUED-reset statuses, not the pre-clear snapshot.
+        // See note in the 'week' branch — fetch post-sweep + post-clear so
+        // the planner sees QUEUED-reset statuses.
         const freshTasks = await tx.task.findMany({
           where: {
             userId: user.id,
