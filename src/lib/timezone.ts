@@ -76,3 +76,22 @@ export function zonedDayBoundsToUTC(
     end: zonedWallClockToUTC(dateStr, '23:59:59.999', timeZone),
   };
 }
+
+/**
+ * Hour-of-day (0..23) of `d` as observed in `timeZone`. Use this when you
+ * need to compare a block's `startHour` against the current wall-clock hour
+ * in the user's zone — `Date.getHours()` would return the runtime's hour,
+ * which only happens to match the user's hour while there's a single user
+ * whose TZ matches the container's TZ env.
+ *
+ * `'en-CA'` formats hours in 24h layout; `hour12: false` reinforces it. The
+ * `% 24` guards against the rare locale that renders midnight as "24".
+ */
+export function zonedHour(d: Date, timeZone: string): number {
+  const hh = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    hour: '2-digit',
+    hour12: false,
+  }).format(d);
+  return parseInt(hh, 10) % 24;
+}

@@ -8,19 +8,39 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
 /**
- * Prisma `where` shape that matches a *live* TimeBlock — one whose date is
- * not before `todayStart` and which has not been completed. Used to express
+ * Prisma `where` shape that matches a *live* TimeBlock — one that has not
+ * been completed AND whose start has not yet elapsed. Used to express
  * "task has no live blocks" via Prisma's relation `none` filter:
  *
- *   blocks: { none: liveBlockFilter(todayStart) }
+ *   blocks: { none: liveBlockFilter(todayStart, currentHour) }
  *
- * `todayStart` should be midnight UTC of the user's local calendar day
- * (computed via `toLocalDateString(new Date(), resolveTimezone(prefs))` on
- * the server). Block dates are `@db.Date`, so a strict `< todayStart`
- * comparison correctly classifies "yesterday or earlier" as past.
+ * Hour granularity matters: a block dated *today* with `startHour <=
+ * currentHour` has elapsed without being executed and is no longer live.
+ * Without this, a 9 AM block at 8 PM would be treated as live, leaving its
+ * task pinned to a SCHEDULED status the planner would then drop — exactly
+ * the stale-scheduled symptom this predicate is meant to fix.
+ *
+ * Inputs:
+ *   - `todayStart`: midnight UTC of the user's local calendar day, derived
+ *     from `toLocalDateString(now, resolveTimezone(prefs))`.
+ *   - `currentHour`: 0..23, the user's local hour-of-day, derived from
+ *     `zonedHour(now, resolveTimezone(prefs))`.
+ *
+ * Live ⇔ (date strictly after today) OR (date == today AND startHour
+ * strictly after currentHour). Blocks for the current hour are treated as
+ * past, matching the convention in `rescheduleFromNow`.
  */
-export function liveBlockFilter(todayStart: Date): Prisma.TimeBlockWhereInput {
-  return { completed: false, date: { gte: todayStart } };
+export function liveBlockFilter(
+  todayStart: Date,
+  currentHour: number,
+): Prisma.TimeBlockWhereInput {
+  return {
+    completed: false,
+    OR: [
+      { date: { gt: todayStart } },
+      { date: todayStart, startHour: { gt: currentHour } },
+    ],
+  };
 }
 
 export interface ClearBlocksOptions {

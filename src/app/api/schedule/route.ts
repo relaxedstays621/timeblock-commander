@@ -6,7 +6,7 @@ import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } fro
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
 import { clearBlocks, liveBlockFilter } from '@/lib/blocks';
-import { resolveTimezone } from '@/lib/timezone';
+import { resolveTimezone, zonedHour } from '@/lib/timezone';
 import { toLocalDateString } from '@/lib/local-date';
 import type { TaskType } from '@prisma/client';
 
@@ -53,19 +53,24 @@ export async function POST(req: NextRequest) {
       // should survive the rename. Excluding tasks whose `completedAt` is
       // already set keeps us from resurrecting genuinely finished work.
       const userTz = resolveTimezone(prefs);
-      const todayLocalStr = toLocalDateString(new Date(), userTz);
+      const now = new Date();
+      const todayLocalStr = toLocalDateString(now, userTz);
       // todayStart = midnight UTC of the user's local calendar day. Block
       // dates are @db.Date (midnight UTC of the stored day), so a strict
       // `< todayStart` correctly classifies "yesterday or earlier" as past.
       const todayStart = new Date(todayLocalStr);
+      // currentHour drives the same-day "has this slot already elapsed"
+      // check inside liveBlockFilter. Without it, a 9 AM block at 8 PM
+      // would still register as live and the sweep would skip it.
+      const currentHour = zonedHour(now, userTz);
 
       const staleScheduled = await tx.task.findMany({
         where: {
           userId: user.id,
           completedAt: null,
           blocks: {
-            some: {},                                  // has at least one block
-            none: liveBlockFilter(todayStart),         // none of them are live
+            some: {},                                            // has at least one block
+            none: liveBlockFilter(todayStart, currentHour),      // none of them are live
           },
         },
         select: { id: true, blocks: { select: { id: true } } },
@@ -126,7 +131,7 @@ export async function POST(req: NextRequest) {
                 userId: user.id,
                 id: { in: affectedTaskIds },
                 completedAt: null,
-                blocks: { none: liveBlockFilter(todayStart) },
+                blocks: { none: liveBlockFilter(todayStart, currentHour) },
               },
               data: { status: 'QUEUED' },
             });
