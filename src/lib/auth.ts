@@ -37,6 +37,58 @@ export const authOptions: NextAuthOptions = {
       }
       return session;
     },
+    /**
+     * Persist refreshed OAuth tokens on every sign-in.
+     *
+     * NextAuth v4's PrismaAdapter only writes Account tokens via
+     * `linkAccount`, which fires on *first* link. On a subsequent sign-in
+     * for an already-linked (provider, providerAccountId) pair, the fresh
+     * `access_token` / `refresh_token` / `expires_at` returned by Google
+     * are silently discarded — leaving us with the (now-dead) tokens from
+     * the original consent. That's how `invalid_grant` errors persist
+     * across re-auths without anything visibly broken in the sign-in UX.
+     *
+     * We close the gap here: when the OAuth response carries token
+     * material, upsert it into the Account row keyed by the compound
+     * unique `(provider, providerAccountId)`. Refresh tokens are only
+     * overwritten when the new payload supplies one — Google omits the
+     * RT on subsequent flows that don't go through `prompt=consent`, and
+     * we don't want to clobber a still-valid stored RT in that case.
+     *
+     * Returns `true` unconditionally so this never blocks sign-in; the
+     * callback's job is the side-effect, not access control.
+     */
+    async signIn({ account }) {
+      if (account?.provider && account.providerAccountId) {
+        const data: Record<string, unknown> = {};
+        if (account.access_token) data.access_token = account.access_token;
+        if (account.refresh_token) data.refresh_token = account.refresh_token;
+        if (account.expires_at) data.expires_at = account.expires_at;
+        if (account.id_token) data.id_token = account.id_token;
+        if (account.scope) data.scope = account.scope;
+        if (account.token_type) data.token_type = account.token_type;
+
+        if (Object.keys(data).length > 0) {
+          try {
+            await prisma.account.update({
+              where: {
+                provider_providerAccountId: {
+                  provider: account.provider,
+                  providerAccountId: account.providerAccountId,
+                },
+              },
+              data,
+            });
+          } catch (e) {
+            // First-link race or other transient DB error — don't block
+            // sign-in; PrismaAdapter's linkAccount will still write the
+            // initial row from the same OAuth response on first link.
+            console.error('[auth] account token upsert failed:', e);
+          }
+        }
+      }
+      return true;
+    },
   },
 };
 

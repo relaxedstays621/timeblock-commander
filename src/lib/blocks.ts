@@ -7,6 +7,22 @@ import type { Prisma, PrismaClient } from '@prisma/client';
  */
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
+/**
+ * Prisma `where` shape that matches a *live* TimeBlock — one whose date is
+ * not before `todayStart` and which has not been completed. Used to express
+ * "task has no live blocks" via Prisma's relation `none` filter:
+ *
+ *   blocks: { none: liveBlockFilter(todayStart) }
+ *
+ * `todayStart` should be midnight UTC of the user's local calendar day
+ * (computed via `toLocalDateString(new Date(), resolveTimezone(prefs))` on
+ * the server). Block dates are `@db.Date`, so a strict `< todayStart`
+ * comparison correctly classifies "yesterday or earlier" as past.
+ */
+export function liveBlockFilter(todayStart: Date): Prisma.TimeBlockWhereInput {
+  return { completed: false, date: { gte: todayStart } };
+}
+
 export interface ClearBlocksOptions {
   userId: string;
   /** A single date matches blocks on that day; a range matches gte/lte. */

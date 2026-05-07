@@ -5,7 +5,7 @@ import { scheduleDay, scheduleWeek, rescheduleFromNow } from '@/lib/scheduler';
 import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } from '@/lib/scoring';
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
-import { clearBlocks } from '@/lib/blocks';
+import { clearBlocks, liveBlockFilter } from '@/lib/blocks';
 import { resolveTimezone } from '@/lib/timezone';
 import { toLocalDateString } from '@/lib/local-date';
 import type { TaskType } from '@prisma/client';
@@ -64,8 +64,8 @@ export async function POST(req: NextRequest) {
           userId: user.id,
           completedAt: null,
           blocks: {
-            some: {},                                 // has at least one block
-            none: { completed: false, date: { gte: todayStart } }, // no live block
+            some: {},                                  // has at least one block
+            none: liveBlockFilter(todayStart),         // none of them are live
           },
         },
         select: { id: true, blocks: { select: { id: true } } },
@@ -90,8 +90,7 @@ export async function POST(req: NextRequest) {
 
       if (action === 'reschedule') {
         // Fetch tasks and blocks INSIDE the tx, after the sweep, so we
-        // observe the post-sweep state. This is what makes the sweep
-        // actually take effect for the reschedule path.
+        // observe the post-sweep state.
         const tasks = await tx.task.findMany({
           where: {
             userId: user.id,
@@ -102,13 +101,51 @@ export async function POST(req: NextRequest) {
           where: { userId: user.id },
         });
 
-        const { remove, add } = rescheduleFromNow(tasks, existingBlocks, config);
+        // First pass: classify blocks (keep = past/completed; remove =
+        // future/uncompleted). The `add` from this call is unreliable
+        // because tasks linked to to-be-removed blocks are still SCHEDULED
+        // in this snapshot — the planner's filter would drop them.
+        const { keep, remove } = rescheduleFromNow(tasks, existingBlocks, config);
+
         if (remove.length > 0) {
           await tx.timeBlock.deleteMany({
             where: { id: { in: remove.map((b) => b.id) } },
           });
+
+          // Reset task status for any task whose blocks are now all stale
+          // (or zero) after the removal. Reuses the same "no live block"
+          // predicate as the leading sweep so the rule is consistent.
+          // Without this, a task whose only block was just removed stays
+          // SCHEDULED and the second planner pass would still drop it.
+          const affectedTaskIds = remove
+            .map((b) => b.taskId)
+            .filter((id): id is string => Boolean(id));
+          if (affectedTaskIds.length > 0) {
+            await tx.task.updateMany({
+              where: {
+                userId: user.id,
+                id: { in: affectedTaskIds },
+                completedAt: null,
+                blocks: { none: liveBlockFilter(todayStart) },
+              },
+              data: { status: 'QUEUED' },
+            });
+          }
         }
-        slots = add;
+
+        // Second pass: refetch tasks (now reflecting the resets above) and
+        // run the planner against the survivor blocks (`keep`). Passing
+        // `keep` instead of the full block set means the classifier sees
+        // nothing to remove this time around — keep stays kept, remove
+        // is empty, and `add` is the real plan.
+        const freshTasks = await tx.task.findMany({
+          where: {
+            userId: user.id,
+            status: { in: ['QUEUED', 'BACKLOG', 'SCHEDULED'] },
+          },
+        });
+        const replan = rescheduleFromNow(freshTasks, keep, config);
+        slots = replan.add;
       } else if (action === 'week') {
         const weekStart = startOfWeek(date, { weekStartsOn: 1 });
         const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
