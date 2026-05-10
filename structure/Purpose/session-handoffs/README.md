@@ -51,3 +51,7 @@ Skip the handoff only when the session completed a single self-contained task wi
 ## When to read
 
 The incoming agent reads the newest handoff right after the standard boot protocol (`../boot-protocol.md`), before starting work. Treat the handoff as the starting state, not as a replacement for the boot protocol itself.
+
+## Commit before audit
+
+Session handoffs must be committed before the Audit Agent reviews them. Audit decisions cite SHAs, so an untracked handoff cannot be cited durably. See `../delegation-contract.md` "Bookkeeping Artifact Commit Policy" for the rule and the Audit Agent obligation that flows from it.

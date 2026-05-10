@@ -45,3 +45,4 @@ Items the agent must explicitly **not** have done.
 
 - [ ] active session handoff under `../session-handoffs/` reflects the current state, if the session is ending
 - [ ] git branch and commit are recorded in the handoff
+- [ ] this checklist and its session handoff are committed (not `M` or `??`) before requesting the Audit Agent — see `../delegation-contract.md` "Bookkeeping Artifact Commit Policy"

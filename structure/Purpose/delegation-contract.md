@@ -268,6 +268,32 @@ Boundaries:
 <Do not modify unrelated files. Preserve user changes. Keep fixes scoped to findings.>
 ```
 
+## Bookkeeping Artifact Commit Policy
+
+All bookkeeping artifacts must be committed before the Audit Agent reviews them. Bookkeeping artifacts include:
+
+- checklists under `checklists/`
+- session handoffs under `session-handoffs/`
+- audit reports or notes
+- scope updates under `scope.md`
+- any other process artifact whose role is to record what happened, not to change project behavior
+
+### Rationale
+
+Audit decisions cite a specific commit SHA. Uncommitted state is not durable — the working tree can be reset, stashed, or overwritten between audit and accept. If the audit cites a `M`/`??` artifact, the citation cannot be reproduced later and the audit trail is broken.
+
+### Audit Agent obligation
+
+The Audit Agent must refuse to accept any bookkeeping artifact that is `M` (modified) or `??` (untracked) in git, and must ask the operator to commit first. Refusal is not a finding against the work — it is a process precondition.
+
+### Post-audit fixes
+
+When the audit recommends revise and the Development Agent applies fixes to a bookkeeping artifact, the fixes go into a **follow-up commit** rather than amending the original bookkeeping commit. This preserves a clean before/after diff of the audit's impact and keeps the cited SHA stable.
+
+### Out of scope for this policy
+
+This rule governs bookkeeping artifacts only. Project code changes follow the normal commit workflow defined elsewhere; this policy does not require every diff to be committed before an audit reads it.
+
 ## Done Definitions
 
 Done depends on role and context.
@@ -286,6 +312,7 @@ Done means:
 
 Done means:
 
+- bookkeeping artifacts under review are committed; uncommitted artifacts are refused, not findings (see `Bookkeeping Artifact Commit Policy` above)
 - findings are ordered by severity and reported before summary
 - each finding is grounded in evidence or clearly labeled as inference
 - severity is clear

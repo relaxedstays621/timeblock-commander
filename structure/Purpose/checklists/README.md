@@ -43,3 +43,7 @@ Do not delete completed checklists. They are the verification trail.
 The template carries the standard Development Agent and Audit Agent done lists derived from `../roles.md` and `../delegation-contract.md`. Task-specific items are added beneath them.
 
 If the prose in `../roles.md` or `../delegation-contract.md` changes, update `_template.md` too.
+
+## Commit before audit
+
+Checklists must be committed before the Audit Agent reviews them. Audit decisions cite SHAs, so a modified-but-uncommitted checklist cannot be cited durably. See `../delegation-contract.md` "Bookkeeping Artifact Commit Policy" for the rule and the Audit Agent obligation that flows from it.
