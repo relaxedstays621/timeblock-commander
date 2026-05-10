@@ -67,11 +67,18 @@ export interface ScheduleSlot {
 // CORE SCHEDULER
 // ─────────────────────────────────────────────────────────
 
+/**
+ * `earliestStartSlot` clamps the day's first available slot upward. Pass
+ * it when scheduling today after some of the day has elapsed — the
+ * rescheduler does this so a task can't land at 9:00 when "now" is 9:42.
+ * For future days, leave undefined and the configured dayStart applies.
+ */
 export function scheduleDay(
   tasks: Task[],
   date: Date,
   existingBlocks: TimeBlock[],
-  config: SchedulerConfig = DEFAULT_CONFIG
+  config: SchedulerConfig = DEFAULT_CONFIG,
+  earliestStartSlot?: number,
 ): ScheduleSlot[] {
   const dateStr = format(date, 'yyyy-MM-dd');
 
@@ -101,9 +108,15 @@ export function scheduleDay(
   const primeStartSlot = config.primeStart * SLOTS_PER_HOUR;
   const primeEndSlot = config.primeEnd * SLOTS_PER_HOUR;
 
+  // Effective day-start. The caller may push it forward when scheduling
+  // today after some slots have elapsed; future days pass nothing.
+  const effectiveDayStartSlot = earliestStartSlot != null
+    ? Math.max(dayStartSlot, earliestStartSlot)
+    : dayStartSlot;
+
   const allSlots = Array.from(
-    { length: dayEndSlot - dayStartSlot },
-    (_, i) => dayStartSlot + i
+    { length: Math.max(0, dayEndSlot - effectiveDayStartSlot) },
+    (_, i) => effectiveDayStartSlot + i
   );
   const primeSlots = allSlots.filter((s) => s >= primeStartSlot && s < primeEndSlot);
   const nonPrimeSlots = allSlots.filter((s) => s < primeStartSlot || s >= primeEndSlot);
@@ -172,11 +185,17 @@ export function scheduleDay(
 // WEEK SCHEDULER
 // ─────────────────────────────────────────────────────────
 
+/**
+ * `earliestStartSlotForToday` clamps only today's first available slot;
+ * future days fall back to the configured dayStart. The rescheduler passes
+ * this when scheduling mid-day so already-elapsed :15 slots are skipped.
+ */
 export function scheduleWeek(
   tasks: Task[],
   existingBlocks: TimeBlock[],
   config: SchedulerConfig = DEFAULT_CONFIG,
-  startDate?: Date
+  startDate?: Date,
+  earliestStartSlotForToday?: number,
 ): ScheduleSlot[] {
   const weekStart = startDate || startOfWeek(new Date(), { weekStartsOn: 1 });
   const todayStart = startOfDay(new Date());
@@ -203,11 +222,14 @@ export function scheduleWeek(
     // Filter to unscheduled tasks
     const remaining = scoredTasks.filter(({ task }) => !scheduledTaskIds.has(task.id));
 
+    const isToday = startOfDay(date).getTime() === todayStart.getTime();
+
     const daySlots = scheduleDay(
       remaining.map(({ task }) => task),
       date,
       existingBlocks,
-      config
+      config,
+      isToday ? earliestStartSlotForToday : undefined,
     );
 
     for (const slot of daySlots) {
@@ -271,8 +293,14 @@ export function rescheduleFromNow(
     }
   }
 
+  // Today's first available :15 slot, rounded up from "now". Math.ceil
+  // handles 9:42 → 9:45, 9:45 → 9:45, 9:46 → 10:00. Future days are
+  // unaffected; scheduleWeek applies this clamp only to the today
+  // iteration.
+  const earliestStartSlotForToday = Math.ceil((currentHour * 60 + currentMinute) / SLOT_MIN);
+
   // Reschedule with only kept blocks as constraints
-  const add = scheduleWeek(tasks, keep, config, now.date);
+  const add = scheduleWeek(tasks, keep, config, now.date, earliestStartSlotForToday);
 
   return { keep, remove, add };
 }

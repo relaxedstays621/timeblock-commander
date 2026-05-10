@@ -78,7 +78,11 @@ export default function DashboardPage() {
   // JSON form encodes the stored calendar day, so a UTC `toISOString()` here
   // would silently mis-bucket blocks late at night.
   const todayStr = toLocalDateString(now);
-  const todayBlocks = blocks.filter((b: any) => b.date?.split('T')[0] === todayStr).sort((a: any, b: any) => a.startHour - b.startHour);
+  const todayBlocks = blocks
+    .filter((b: any) => b.date?.split('T')[0] === todayStr)
+    .sort((a: any, b: any) =>
+      (a.startHour * 60 + (a.startMinute || 0)) - (b.startHour * 60 + (b.startMinute || 0)),
+    );
   const carryovers = tasks.filter((t: any) => t.carryover);
   // Use the same top-3 selection as the scheduler/analytics so sidebar,
   // banner, and analytics stay consistent (cross-company spread, etc).
@@ -319,22 +323,62 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
       .catch(() => {});
   }, [todayStr]);
 
-  // Filter hours to show from day start
-  const visibleHours = HOURS.filter(h => h >= dayStartHour);
+  // :15 grid: render every :15 slot of the day. Slot index = hour*4 + (minute/15).
+  // HOURS spans 6am..8pm; the end-of-day cutoff is the start of 9pm (slot 84).
+  const SLOTS_PER_HOUR = 4;
+  const SLOT_MIN = 15;
+  const dayStartSlot = dayStartHour * SLOTS_PER_HOUR;
+  const dayEndSlot = 21 * SLOTS_PER_HOUR; // exclusive — last rendered slot is 8:45p
+  const visibleSlots: number[] = [];
+  for (let s = dayStartSlot; s < dayEndSlot; s++) visibleSlots.push(s);
 
-  // Map calendar events to hours
-  const getCalEventForHour = (hour: number) => {
+  // The slot that "now" lives in. Used to highlight the current :15 row and
+  // to position the live-now bar in a later checklist item.
+  const currentSlot = currentHour * SLOTS_PER_HOUR + Math.floor(now.getMinutes() / SLOT_MIN);
+
+  // Lookups operate on slot indices so a 9:30 block is not confused with a
+  // 9:00 block.
+  const getBlockStartingAt = (slot: number) => {
+    return blocks.find((b: any) =>
+      (b.startHour * SLOTS_PER_HOUR + Math.floor((b.startMinute || 0) / SLOT_MIN)) === slot,
+    );
+  };
+  const getCalEventStartingAt = (slot: number) => {
     return calEvents.find((e: any) => {
       const start = new Date(e.start?.dateTime || e.start?.date);
-      return start.getHours() === hour;
+      return (start.getHours() * SLOTS_PER_HOUR + Math.floor(start.getMinutes() / SLOT_MIN)) === slot;
     });
   };
-  const getBufferForHour = (hour: number) => {
+  // Buffer chip shows in the last :15 slot before a calendar event (i.e., :45
+  // of the hour before). Hour-precision pre-:15-grid behaviour preserved.
+  const getBufferForSlot = (slot: number) => {
+    const minute = (slot % SLOTS_PER_HOUR) * SLOT_MIN;
+    if (minute !== 45) return undefined;
+    const hour = Math.floor(slot / SLOTS_PER_HOUR);
     return calEvents.find((e: any) => {
       const start = new Date(e.start?.dateTime || e.start?.date);
       return start.getHours() === hour + 1 && buffers[e.id];
     });
   };
+
+  // A <=15-min block reserves 2 slots (30 min) of grid space so two short
+  // blocks can't visually overlap. Mirrors gridSlotsForDuration in scheduler.ts.
+  const slotsForDuration = (durationMinutes: number) => {
+    if (durationMinutes <= SLOT_MIN) return 2;
+    return Math.max(1, Math.ceil(durationMinutes / SLOT_MIN));
+  };
+  const slotsForCalEvent = (calEvent: any) => {
+    const start = new Date(calEvent.start?.dateTime || calEvent.start?.date);
+    const end = new Date(calEvent.end?.dateTime || calEvent.end?.date);
+    const dur = Math.max(0, (end.getTime() - start.getTime()) / 60000);
+    return slotsForDuration(dur);
+  };
+
+  const SLOT_PX = 22; // visual height of one :15 row
+
+  // Track which slot index the most recent multi-slot item extends through,
+  // so we skip rendering the rows it visually occupies.
+  let coveredThrough = -1;
 
   return (
     <div>
@@ -385,33 +429,63 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
         </div>
       )}
 
-      {/* Timeline */}
+      {/* Timeline — :15 grid */}
       <div className="mb-6">
-        {visibleHours.map((hour) => {
-          const block = blocks.find((b: any) => b.startHour === hour);
+        {visibleSlots.map((slot) => {
+          if (slot <= coveredThrough) return null;
+
+          const hour = Math.floor(slot / SLOTS_PER_HOUR);
+          const minute = (slot % SLOTS_PER_HOUR) * SLOT_MIN;
+          const isHourStart = minute === 0;
           const isPrime = hour >= 8 && hour < 12;
-          const isCurrent = hour === currentHour;
+          const isCurrentSlot = slot === currentSlot;
+
+          const block = getBlockStartingAt(slot);
+          const calEvent = !block ? getCalEventStartingAt(slot) : undefined;
+          const bufferEvent = !block && !calEvent ? getBufferForSlot(slot) : undefined;
+
+          let span = 1;
+          if (block) {
+            span = slotsForDuration(block.durationMinutes);
+            coveredThrough = slot + span - 1;
+          } else if (calEvent && !ignoredEvents[calEvent.id]) {
+            span = slotsForCalEvent(calEvent);
+            coveredThrough = slot + span - 1;
+          }
+
+          const rowMinHeight = span * SLOT_PX;
+          // Hour boundaries get a slightly stronger divider so the grid still
+          // reads as hours-with-:15-ticks rather than 60 anonymous rows.
+          const borderClass = isHourStart ? 'border-t border-white/[0.07]' : 'border-t border-white/[0.02]';
+
           const task = block?.task;
-          const blockHeight = block ? Math.max(48, (block.durationMinutes / 60) * 80) : 56;
-          const calEvent = getCalEventForHour(hour);
-          const calEventDuration = calEvent ? Math.max(15, (new Date(calEvent.end?.dateTime || calEvent.end?.date).getTime() - new Date(calEvent.start?.dateTime || calEvent.start?.date).getTime()) / 60000) : 60;
-          const calEventHeight = calEvent ? Math.max(32, (calEventDuration / 60) * 80) : 56;
 
           return (
-            <div key={hour} className={`flex gap-4 border-b border-white/[0.04] ${isCurrent ? 'bg-accent-red/[0.04]' : ''}`} style={{ minHeight: block ? blockHeight : calEvent ? calEventHeight : 56 }}>
-              <div className="w-14 flex items-center justify-end gap-1 flex-shrink-0 pr-2">
-                <span className="text-[12px] text-white/30 font-medium tabular-nums">
-                  {hour > 12 ? hour - 12 : hour}{hour >= 12 ? 'p' : 'a'}
-                </span>
-                {isPrime && <span className="text-[8px] text-amber-400">★</span>}
+            <div
+              key={slot}
+              className={`flex gap-4 ${borderClass} ${isCurrentSlot ? 'bg-accent-red/[0.04]' : ''}`}
+              style={{ minHeight: rowMinHeight }}
+            >
+              <div className="w-14 flex items-start justify-end gap-1 flex-shrink-0 pr-2 pt-1">
+                {isHourStart ? (
+                  <>
+                    <span className="text-[12px] text-white/30 font-medium tabular-nums">
+                      {hour > 12 ? hour - 12 : hour}{hour >= 12 ? 'p' : 'a'}
+                    </span>
+                    {isPrime && <span className="text-[8px] text-amber-400">★</span>}
+                  </>
+                ) : (
+                  <span className="text-[10px] text-white/[0.14] tabular-nums">:{String(minute).padStart(2, '0')}</span>
+                )}
               </div>
               <div className="flex-1 py-1">
                 {block ? (
                   <div
-                    className={`flex items-start gap-3 px-3.5 py-2.5 rounded-lg cursor-pointer transition-colors ${block.completed ? 'opacity-50' : 'hover:bg-white/[0.05]'}`}
+                    className={`flex items-start gap-3 px-3.5 py-2 rounded-lg cursor-pointer transition-colors ${block.completed ? 'opacity-50' : 'hover:bg-white/[0.05]'}`}
                     style={{
                       borderLeft: `3px solid ${block.completed ? 'rgba(255,255,255,0.15)' : COMPANY_COLORS[block.company as Company]?.accent}`,
-                      background: block.completed ? 'rgba(22,160,133,0.06)' : isCurrent ? 'rgba(233,69,96,0.08)' : 'rgba(255,255,255,0.03)',
+                      background: block.completed ? 'rgba(22,160,133,0.06)' : isCurrentSlot ? 'rgba(233,69,96,0.08)' : 'rgba(255,255,255,0.03)',
+                      minHeight: rowMinHeight - 6,
                     }}
                   >
                     <button
@@ -429,7 +503,9 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
                       <div className="flex gap-2 items-center flex-wrap">
                         <CompanyTag company={block.company} />
                         <TaskTypeTag type={block.taskType} />
-                        <span className="text-[10px] text-white/35">{block.durationMinutes}m</span>
+                        <span className="text-[10px] text-white/35 tabular-nums">
+                          {hour > 12 ? hour - 12 : hour}:{String(minute).padStart(2, '0')}{hour >= 12 ? 'p' : 'a'} · {block.durationMinutes}m
+                        </span>
                         {block.completed && <span className="text-[10px] text-emerald-400 font-semibold">Complete</span>}
                       </div>
                       {!block.completed && (
@@ -445,7 +521,7 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
                     </div>
                   </div>
                 ) : calEvent && !ignoredEvents[calEvent.id] ? (
-                  <div className="px-3.5 py-2.5 rounded-lg bg-purple-500/[0.08] border-l-[3px] border-purple-400" style={{ minHeight: calEventHeight }}>
+                  <div className="px-3.5 py-2 rounded-lg bg-purple-500/[0.08] border-l-[3px] border-purple-400" style={{ minHeight: rowMinHeight - 6 }}>
                     <div className="flex justify-between items-start">
                       <div>
                         <div className="text-[14px] font-semibold mb-1">{calEvent.summary}</div>
@@ -456,7 +532,6 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
                             {' - '}
                             {new Date(calEvent.end?.dateTime || calEvent.end?.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                           </span>
-                          <span className="text-[10px] text-white/25">{Math.round(calEventDuration)}m</span>
                         </div>
                       </div>
                       <button
@@ -467,22 +542,22 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
                       </button>
                     </div>
                   </div>
-                ) : getBufferForHour(hour) && !ignoredEvents[getBufferForHour(hour).id] ? (
-                  <div className="flex items-center justify-between px-3.5 py-1.5 rounded-lg bg-amber-400/[0.05] border-l-[3px] border-amber-400/40" style={{ minHeight: 28 }}>
+                ) : bufferEvent && !ignoredEvents[bufferEvent.id] ? (
+                  <div className="flex items-center justify-between px-3.5 py-1 rounded-lg bg-amber-400/[0.05] border-l-[3px] border-amber-400/40">
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] text-amber-400/70">⏱ 15m prep</span>
-                      <span className="text-[10px] text-white/30">before {getBufferForHour(hour).summary}</span>
+                      <span className="text-[10px] text-white/30">before {bufferEvent.summary}</span>
                     </div>
                     <button
                       className="text-[10px] text-white/30 hover:text-red-400 px-2 py-0.5 rounded"
-                      onClick={() => setBuffers(prev => ({ ...prev, [getBufferForHour(hour).id]: false }))}
+                      onClick={() => setBuffers(prev => ({ ...prev, [bufferEvent.id]: false }))}
                     >
                       ✕
                     </button>
                   </div>
-                ) : (
-                  <div className="px-3.5 py-2.5 text-[12px] text-white/[0.12]">Available</div>
-                )}
+                ) : isHourStart ? (
+                  <div className="px-3.5 py-1 text-[12px] text-white/[0.12]">Available</div>
+                ) : null}
               </div>
             </div>
           );
@@ -532,17 +607,31 @@ function WeekView({ now, blocks, tasks, onSelectTask }: any) {
                 <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
                 <span className={`text-[13px] font-bold ${isToday ? 'text-accent-red' : 'text-white/60'}`}>{day.getDate()}</span>
               </div>
-              {dayBlocks.length > 0 ? dayBlocks.map((b: any) => (
-                <div
-                  key={b.id}
-                  className="px-2 py-1.5 rounded mb-1 bg-white/[0.03] cursor-pointer hover:bg-white/[0.06] transition-colors"
-                  style={{ borderLeft: `2px solid ${COMPANY_COLORS[b.company as Company]?.accent}` }}
-                  onClick={() => b.task && onSelectTask(b.task)}
-                >
-                  <div className="text-[11px] font-semibold leading-snug">{b.title}</div>
-                  <div className="text-[10px] text-white/30 mt-0.5">{b.startHour > 12 ? b.startHour - 12 : b.startHour}{b.startHour >= 12 ? 'pm' : 'am'}</div>
-                </div>
-              )) : (
+              {dayBlocks.length > 0 ? dayBlocks
+                .slice()
+                .sort((a: any, b: any) =>
+                  (a.startHour * 60 + (a.startMinute || 0)) - (b.startHour * 60 + (b.startMinute || 0)),
+                )
+                .map((b: any) => {
+                  const h = b.startHour;
+                  const m = b.startMinute || 0;
+                  const displayHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
+                  const suffix = h >= 12 ? 'pm' : 'am';
+                  const timeLabel = m === 0
+                    ? `${displayHour}${suffix}`
+                    : `${displayHour}:${String(m).padStart(2, '0')}${suffix}`;
+                  return (
+                    <div
+                      key={b.id}
+                      className="px-2 py-1.5 rounded mb-1 bg-white/[0.03] cursor-pointer hover:bg-white/[0.06] transition-colors"
+                      style={{ borderLeft: `2px solid ${COMPANY_COLORS[b.company as Company]?.accent}` }}
+                      onClick={() => b.task && onSelectTask(b.task)}
+                    >
+                      <div className="text-[11px] font-semibold leading-snug">{b.title}</div>
+                      <div className="text-[10px] text-white/30 mt-0.5 tabular-nums">{timeLabel}</div>
+                    </div>
+                  );
+                }) : (
                 <div className="text-[11px] text-white/[0.12] text-center py-4">No blocks</div>
               )}
             </div>
