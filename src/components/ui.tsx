@@ -67,18 +67,27 @@ const STATUS_STYLES: Record<string, string> = {
   DROPPED: 'bg-red-500/15 text-red-400',
 };
 
-// `isScheduled` is the derived flag computed by GET /api/tasks; when true
-// the badge renders SCHEDULED regardless of the stored status, because as
-// of item 03 of the daily-planning scope "scheduled" is derived from
-// today's/this-week's blocks, not stored. Terminal stored statuses
-// (COMPLETE / DROPPED / DEFERRED / IN_PROGRESS) still win over the derived
-// flag — once a task is done or actively in progress, it is not merely
-// "scheduled".
+// `isScheduled` is the derived flag computed by GET /api/tasks; as of
+// item 03 of the daily-planning scope, "scheduled" is derived from
+// today's/this-week's blocks, not stored. Display rules:
+//   • Terminal stored statuses (IN_PROGRESS / COMPLETE / DEFERRED /
+//     DROPPED) always win — a task that is done isn't merely
+//     "scheduled".
+//   • Non-terminal stored statuses (BACKLOG / QUEUED / legacy SCHEDULED)
+//     defer to the derived flag: render SCHEDULED iff `isScheduled` is
+//     true; otherwise render QUEUED for legacy SCHEDULED (no live
+//     blocks this week) so a stale literal doesn't mis-report state.
+const TERMINAL_STATUSES = new Set(['IN_PROGRESS', 'COMPLETE', 'DEFERRED', 'DROPPED']);
+
 export function StatusBadge({ status, isScheduled }: { status: string; isScheduled?: boolean }) {
-  const displayStatus =
-    isScheduled && (status === 'BACKLOG' || status === 'QUEUED' || status === 'SCHEDULED')
-      ? 'SCHEDULED'
-      : status;
+  let displayStatus = status;
+  if (!TERMINAL_STATUSES.has(status)) {
+    if (isScheduled) {
+      displayStatus = 'SCHEDULED';
+    } else if (status === 'SCHEDULED') {
+      displayStatus = 'QUEUED';
+    }
+  }
   return (
     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${STATUS_STYLES[displayStatus] || 'bg-white/5 text-white/40'}`}>
       {displayStatus.replace('_', ' ')}
