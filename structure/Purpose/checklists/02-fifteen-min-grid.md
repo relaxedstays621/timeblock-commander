@@ -25,10 +25,10 @@ Owner: matthewb621@gmail.com
 
 ## Task-specific verification
 
-Evidence scope for this section: commits `425ef49` and `9ca42f3`.
+Evidence scope for this section: commits `425ef49`, `9ca42f3`, and the audit-response fix `628e6b0`.
 
-- [x] day-start helper rounds the operator's start time up to the next :15 (e.g., 7:42 → 7:45, 7:46 → 8:00) — `src/lib/local-date.ts` `alignToFifteen()` + `src/lib/scheduler.ts` `rescheduleFromNow` uses `Math.ceil((currentHour*60 + currentMinute) / 15)` to derive today's earliest slot
-- [x] all generated block start and end times are :15-aligned — `scheduleDay` operates on slot indices; `startHour` and `startMinute` are derived as `Math.floor(slot / 4)` and `(slot % 4) * 15`, both :15-aligned by construction
+- [x] day-start helper rounds the operator's start time up to the next :15 (e.g., 7:42 → 7:45, 7:46 → 8:00) — `src/lib/local-date.ts` `alignToFifteen()` + `src/lib/scheduler.ts` `rescheduleFromNow` derives the clamp via `Math.ceil((currentHour*60 + currentMinute) / 15)`. **Audit follow-up (commit `628e6b0`):** the clamp is now also passed by the `'today'` and `'week'` branches of `src/app/api/schedule/route.ts`, not just `'reschedule'`. All three scheduling actions enforce the rule end-to-end.
+- [x] all generated block start and end times are :15-aligned — starts: `scheduleDay` operates on slot indices; `startHour` and `startMinute` are derived as `Math.floor(slot / 4)` and `(slot % 4) * 15`, both :15-aligned by construction. **Audit follow-up (commit `628e6b0`):** durations are now also snapped via `alignedDuration = Math.ceil(estimatedMinutes / 15) * 15` and that aligned value is what is persisted as `block.durationMinutes` (and used in the daily-capacity check). End-time = start + alignedDuration is :15-aligned by construction. `task.estimatedMinutes` is left untouched.
 - [x] a 15-minute task renders as a 30-minute slot on the grid — `gridSlotsForDuration` in `scheduler.ts` and `slotsForDuration` in `page.tsx` both return 2 slots for `≤15`
 - [x] a 30-minute task renders as a 30-minute slot — `Math.ceil(30/15) = 2`
 - [x] a 90-minute task renders as a 90-minute slot — `Math.ceil(90/15) = 6`
