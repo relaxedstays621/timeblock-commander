@@ -239,13 +239,11 @@ export async function POST(req: NextRequest) {
         })),
       });
 
-      const taskIds = slots.map((s) => s.taskId);
-      if (taskIds.length > 0) {
-        await tx.task.updateMany({
-          where: { id: { in: taskIds }, userId: user.id },
-          data: { status: 'SCHEDULED' },
-        });
-      }
+      // Intentionally NOT writing `status: 'SCHEDULED'` here. As of item 03,
+      // "scheduled" is a derived state computed from the presence of blocks
+      // in the operator's local this-week range (see GET /api/tasks). The
+      // stored TaskStatus enum still carries SCHEDULED for backward
+      // compatibility with legacy rows; no new writes produce that value.
 
       return blocks;
     },

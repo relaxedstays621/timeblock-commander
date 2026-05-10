@@ -704,7 +704,7 @@ function QueueView({ tasks, onSelectTask, onUpdateTask }: any) {
                   {task.isStrategic && <span className="text-[10px] text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded">★ Strat</span>}
                 </div>
               </div>
-              <StatusBadge status={task.status} />
+              <StatusBadge status={task.status} isScheduled={task.isScheduled} />
             </div>
           ))}
         </div>
@@ -913,7 +913,9 @@ function SettingsView() {
 
 function TaskDetailModal({ task, onClose, onUpdate }: any) {
   const [status, setStatus] = useState(task.status);
-  const statuses = ['BACKLOG', 'QUEUED', 'SCHEDULED', 'IN_PROGRESS', 'COMPLETE', 'DEFERRED', 'DROPPED'];
+  // "Scheduled" is derived from the task's blocks, not manually selectable.
+  // See item 03 of the daily-planning scope and GET /api/tasks isScheduled.
+  const statuses = ['BACKLOG', 'QUEUED', 'IN_PROGRESS', 'COMPLETE', 'DEFERRED', 'DROPPED'];
 
   return (
     <Modal open={true} onClose={onClose} title={task.title}>

@@ -4,11 +4,23 @@ import { prisma } from '@/lib/db';
 import { CreateTaskSchema } from '@/lib/schemas';
 import { calculateScore } from '@/lib/scoring';
 import { getCurrentUser } from '@/lib/auth';
+import { resolveTimezone } from '@/lib/timezone';
+import { toLocalDateString } from '@/lib/local-date';
+import { startOfWeek, endOfWeek } from 'date-fns';
 import type { Task } from '@prisma/client';
 
 // GET /api/tasks — list tasks with optional filters
+//
+// Each returned row is enriched with a derived `isScheduled` boolean:
+// true when the task has at least one TimeBlock whose date falls inside
+// the operator's local ISO this-week range (Monday–Sunday, weekStartsOn:1
+// to match scoring.ts getCurrentWeek). The stored `task.status` is left
+// untouched; "scheduled" is no longer a written status as of item 03
+// of the daily-planning scope. Today is always inside this-week, so the
+// "block today → scheduled regardless of week boundary" rule is
+// implicitly satisfied by the range check.
 export async function GET(req: NextRequest) {
-  const user = await getCurrentUser();
+  const user = await getCurrentUser({ includePreferences: true });
   if (!user) return NextResponse.json({ error: 'No user' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
@@ -26,7 +38,34 @@ export async function GET(req: NextRequest) {
     orderBy: { compositeScore: 'desc' },
   });
 
-  return NextResponse.json(tasks);
+  // Derive isScheduled per task. Two queries total: tasks above, then a
+  // single block lookup keyed on the task ids we just fetched.
+  const userTz = resolveTimezone((user as any).preferences);
+  const now = new Date();
+  // todayLocalDate is midnight-UTC of the operator's local calendar day —
+  // the same anchor pattern used elsewhere with @db.Date columns.
+  const todayLocalDate = new Date(toLocalDateString(now, userTz));
+  const weekStart = startOfWeek(todayLocalDate, { weekStartsOn: 1 });
+  const weekEnd = endOfWeek(todayLocalDate, { weekStartsOn: 1 });
+
+  let scheduledTaskIds = new Set<string>();
+  if (tasks.length > 0) {
+    const blocksInWeek = await prisma.timeBlock.findMany({
+      where: {
+        userId: user.id,
+        taskId: { in: tasks.map((t) => t.id) },
+        date: { gte: weekStart, lte: weekEnd },
+      },
+      select: { taskId: true },
+    });
+    scheduledTaskIds = new Set(
+      blocksInWeek.map((b) => b.taskId).filter((id): id is string => Boolean(id)),
+    );
+  }
+
+  const enriched = tasks.map((t) => ({ ...t, isScheduled: scheduledTaskIds.has(t.id) }));
+
+  return NextResponse.json(enriched);
 }
 
 // POST /api/tasks — create a new task

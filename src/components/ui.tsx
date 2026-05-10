@@ -67,10 +67,21 @@ const STATUS_STYLES: Record<string, string> = {
   DROPPED: 'bg-red-500/15 text-red-400',
 };
 
-export function StatusBadge({ status }: { status: string }) {
+// `isScheduled` is the derived flag computed by GET /api/tasks; when true
+// the badge renders SCHEDULED regardless of the stored status, because as
+// of item 03 of the daily-planning scope "scheduled" is derived from
+// today's/this-week's blocks, not stored. Terminal stored statuses
+// (COMPLETE / DROPPED / DEFERRED / IN_PROGRESS) still win over the derived
+// flag — once a task is done or actively in progress, it is not merely
+// "scheduled".
+export function StatusBadge({ status, isScheduled }: { status: string; isScheduled?: boolean }) {
+  const displayStatus =
+    isScheduled && (status === 'BACKLOG' || status === 'QUEUED' || status === 'SCHEDULED')
+      ? 'SCHEDULED'
+      : status;
   return (
-    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${STATUS_STYLES[status] || 'bg-white/5 text-white/40'}`}>
-      {status.replace('_', ' ')}
+    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${STATUS_STYLES[displayStatus] || 'bg-white/5 text-white/40'}`}>
+      {displayStatus.replace('_', ' ')}
     </span>
   );
 }
