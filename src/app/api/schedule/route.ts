@@ -65,6 +65,11 @@ export async function POST(req: NextRequest) {
       // hour-only check would mis-classify a 9:45 block at 9:30 as past.
       const currentHour = zonedHour(now, userTz);
       const currentMinute = zonedMinute(now, userTz);
+      // Today's first available :15 slot, rounded up. Used by every
+      // scheduling branch (today / week / reschedule) so a Schedule Today
+      // press at 9:42 cannot land a block at 9:00. scheduleWeek applies
+      // this clamp only to whichever iterated day equals today.
+      const earliestStartSlotForToday = Math.ceil((currentHour * 60 + currentMinute) / 15);
 
       const staleScheduled = await tx.task.findMany({
         where: {
@@ -183,7 +188,7 @@ export async function POST(req: NextRequest) {
           where: { userId: user.id },
         });
 
-        slots = scheduleWeek(freshTasks, survivingBlocks, config, date);
+        slots = scheduleWeek(freshTasks, survivingBlocks, config, date, earliestStartSlotForToday);
       } else {
         const dateStr = format(date, 'yyyy-MM-dd');
         const targetDate = new Date(dateStr);
@@ -206,7 +211,16 @@ export async function POST(req: NextRequest) {
           where: { userId: user.id },
         });
 
-        slots = scheduleDay(freshTasks, date, survivingBlocks, config);
+        // Clamp first slot only when scheduling today. Future days fall
+        // back to config.dayStart; past days are out of bounds upstream.
+        const isToday = dateStr === todayLocalStr;
+        slots = scheduleDay(
+          freshTasks,
+          date,
+          survivingBlocks,
+          config,
+          isToday ? earliestStartSlotForToday : undefined,
+        );
       }
 
       if (slots.length === 0) return [];

@@ -127,8 +127,14 @@ export function scheduleDay(
     .reduce((sum, b) => sum + b.durationMinutes, 0);
 
   for (const { task, score } of schedulable) {
-    // Check daily capacity
-    if (dailyMinutesUsed + task.estimatedMinutes > config.maxDailyMinutes) {
+    // Snap the task's estimate upward to the nearest :15 multiple. The
+    // block end-time is start + alignedDuration; aligning here is what
+    // keeps end-times :15-aligned even when the user entered a 20- or
+    // 25-minute estimate. The task's estimatedMinutes is left untouched.
+    const alignedDuration = Math.ceil(task.estimatedMinutes / SLOT_MIN) * SLOT_MIN;
+
+    // Check daily capacity against the value we will actually consume.
+    if (dailyMinutesUsed + alignedDuration > config.maxDailyMinutes) {
       continue;
     }
 
@@ -165,14 +171,14 @@ export function scheduleDay(
           date: dateStr,
           startHour,
           startMinute,
-          durationMinutes: task.estimatedMinutes,
+          durationMinutes: alignedDuration,
           taskId: task.id,
           title: task.title,
           company: task.company,
           taskType: task.taskType,
           score,
         });
-        dailyMinutesUsed += task.estimatedMinutes;
+        dailyMinutesUsed += alignedDuration;
         break;
       }
     }
