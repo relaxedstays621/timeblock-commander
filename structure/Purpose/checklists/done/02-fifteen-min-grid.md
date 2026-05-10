@@ -16,12 +16,17 @@ Owner: matthewb621@gmail.com
 
 ## Audit Agent done
 
-- [ ] findings are ordered by severity and reported before any summary
-- [ ] each finding is grounded in concrete evidence or labeled as inference
-- [ ] verification gaps are named
-- [ ] missing tests are identified
-- [ ] no fixes were implemented unless explicitly reassigned
-- [ ] final recommendation is one of: accept, revise, block
+Two-pass audit conducted against this work:
+
+- **Pass 1** (against `3e48962`): recommendation `Block`. Findings F1 (High, day-start clamp not threaded into `'today'`/`'week'` routes) and F2 (Medium, durations not :15-aligned).
+- **Pass 2** (against `628e6b0`): recommendation `Accept`. Both findings resolved; no remaining block/revise items.
+
+- [x] findings are ordered by severity and reported before any summary
+- [x] each finding is grounded in concrete evidence or labeled as inference
+- [x] verification gaps are named (manual browser visual check, DST-boundary exercise — flagged in audit pass, remain operator-deferred at accept)
+- [x] missing tests are identified (no test suite in repo; audit relied on tsc + diff inspection)
+- [x] no fixes were implemented unless explicitly reassigned (Audit produced findings only; Dev applied fixes in commit `628e6b0`)
+- [x] final recommendation is one of: accept, revise, block — `Accept` on re-pass
 
 ## Task-specific verification
 
