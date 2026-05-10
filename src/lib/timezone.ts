@@ -95,3 +95,17 @@ export function zonedHour(d: Date, timeZone: string): number {
   }).format(d);
   return parseInt(hh, 10) % 24;
 }
+
+/**
+ * Minute-of-hour (0..59) of `d` as observed in `timeZone`. Pairs with
+ * `zonedHour` for :15-grid comparisons against a block's
+ * `(startHour, startMinute)`.
+ */
+export function zonedMinute(d: Date, timeZone: string): number {
+  const mm = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
+  return parseInt(mm, 10) % 60;
+}

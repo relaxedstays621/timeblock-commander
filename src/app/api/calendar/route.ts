@@ -18,17 +18,18 @@ import type { calendar_v3 } from 'googleapis';
  * and let Google interpret it under `timeZone`.
  */
 function buildEventTimes(
-  block: { date: Date; startHour: number; durationMinutes: number },
+  block: { date: Date; startHour: number; startMinute: number; durationMinutes: number },
   timeZone: string
 ): { start: calendar_v3.Schema$EventDateTime; end: calendar_v3.Schema$EventDateTime } {
   const y = block.date.getUTCFullYear();
   const m = String(block.date.getUTCMonth() + 1).padStart(2, '0');
   const d = String(block.date.getUTCDate()).padStart(2, '0');
   const startHH = String(block.startHour).padStart(2, '0');
+  const startMM = String(block.startMinute).padStart(2, '0');
 
   // Compute end as start + duration, rolling over hours within the day. We
   // build a Date in UTC just to do arithmetic, then re-format the components.
-  const startTotalMin = block.startHour * 60;
+  const startTotalMin = block.startHour * 60 + block.startMinute;
   const endTotalMin = startTotalMin + block.durationMinutes;
   const endHour = Math.floor(endTotalMin / 60);
   const endMin = endTotalMin % 60;
@@ -38,7 +39,7 @@ function buildEventTimes(
   const safeEndHour = Math.min(endHour, 23);
   const safeEndMin = endHour > 23 ? 59 : endMin;
 
-  const startStr = `${y}-${m}-${d}T${startHH}:00:00`;
+  const startStr = `${y}-${m}-${d}T${startHH}:${startMM}:00`;
   const endStr = `${y}-${m}-${d}T${String(safeEndHour).padStart(2, '0')}:${String(safeEndMin).padStart(2, '0')}:00`;
 
   return {
@@ -159,7 +160,7 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       date: { gte: dayStart, lte: dayEnd },
     },
-    orderBy: { startHour: 'asc' },
+    orderBy: [{ startHour: 'asc' }, { startMinute: 'asc' }],
   });
 
   const results: Array<{

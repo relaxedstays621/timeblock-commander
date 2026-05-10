@@ -6,7 +6,7 @@ import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } fro
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
 import { clearBlocks, liveBlockFilter } from '@/lib/blocks';
-import { resolveTimezone, zonedHour } from '@/lib/timezone';
+import { resolveTimezone, zonedHour, zonedMinute } from '@/lib/timezone';
 import { toLocalDateString } from '@/lib/local-date';
 import type { TaskType } from '@prisma/client';
 
@@ -59,18 +59,20 @@ export async function POST(req: NextRequest) {
       // dates are @db.Date (midnight UTC of the stored day), so a strict
       // `< todayStart` correctly classifies "yesterday or earlier" as past.
       const todayStart = new Date(todayLocalStr);
-      // currentHour drives the same-day "has this slot already elapsed"
-      // check inside liveBlockFilter. Without it, a 9 AM block at 8 PM
-      // would still register as live and the sweep would skip it.
+      // currentHour and currentMinute drive the same-day "has this slot
+      // already elapsed" check inside liveBlockFilter. Both axes are
+      // required now that blocks can land on any :15 boundary; an
+      // hour-only check would mis-classify a 9:45 block at 9:30 as past.
       const currentHour = zonedHour(now, userTz);
+      const currentMinute = zonedMinute(now, userTz);
 
       const staleScheduled = await tx.task.findMany({
         where: {
           userId: user.id,
           completedAt: null,
           blocks: {
-            some: {},                                            // has at least one block
-            none: liveBlockFilter(todayStart, currentHour),      // none of them are live
+            some: {},                                                          // has at least one block
+            none: liveBlockFilter(todayStart, currentHour, currentMinute),     // none of them are live
           },
         },
         select: { id: true, blocks: { select: { id: true } } },
@@ -110,7 +112,13 @@ export async function POST(req: NextRequest) {
         // future/uncompleted). The `add` from this call is unreliable
         // because tasks linked to to-be-removed blocks are still SCHEDULED
         // in this snapshot — the planner's filter would drop them.
-        const { keep, remove } = rescheduleFromNow(tasks, existingBlocks, config);
+        const reschedulerNow = {
+          date: now,
+          todayStr: todayLocalStr,
+          currentHour,
+          currentMinute,
+        };
+        const { keep, remove } = rescheduleFromNow(tasks, existingBlocks, config, reschedulerNow);
 
         if (remove.length > 0) {
           await tx.timeBlock.deleteMany({
@@ -131,7 +139,7 @@ export async function POST(req: NextRequest) {
                 userId: user.id,
                 id: { in: affectedTaskIds },
                 completedAt: null,
-                blocks: { none: liveBlockFilter(todayStart, currentHour) },
+                blocks: { none: liveBlockFilter(todayStart, currentHour, currentMinute) },
               },
               data: { status: 'QUEUED' },
             });
@@ -149,7 +157,7 @@ export async function POST(req: NextRequest) {
             status: { in: ['QUEUED', 'BACKLOG', 'SCHEDULED'] },
           },
         });
-        const replan = rescheduleFromNow(freshTasks, keep, config);
+        const replan = rescheduleFromNow(freshTasks, keep, config, reschedulerNow);
         slots = replan.add;
       } else if (action === 'week') {
         const weekStart = startOfWeek(date, { weekStartsOn: 1 });
@@ -207,6 +215,7 @@ export async function POST(req: NextRequest) {
         data: slots.map((slot) => ({
           date: new Date(slot.date),
           startHour: slot.startHour,
+          startMinute: slot.startMinute,
           durationMinutes: slot.durationMinutes,
           title: slot.title,
           company: slot.company,
@@ -267,7 +276,7 @@ export async function GET(req: NextRequest) {
       date: new Date(dateStr),
     },
     include: { task: true },
-    orderBy: { startHour: 'asc' },
+    orderBy: [{ startHour: 'asc' }, { startMinute: 'asc' }],
   });
 
   return NextResponse.json(blocks);

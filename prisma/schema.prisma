@@ -148,6 +148,7 @@ model TimeBlock {
   id              String    @id @default(cuid())
   date            DateTime  @db.Date
   startHour       Int // 0-23
+  startMinute     Int       @default(0) // 0, 15, 30, 45 — :15-aligned
   durationMinutes Int       @default(60)
   title           String // denormalized for calendar display
   company         Company
@@ -163,7 +164,7 @@ model TimeBlock {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, date, startHour]) // one block per hour slot
+  @@unique([userId, date, startHour, startMinute]) // one block per :15 slot
   @@index([userId, date])
 }
 

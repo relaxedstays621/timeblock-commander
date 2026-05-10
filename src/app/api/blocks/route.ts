@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
       date: { gte: start, lte: end },
     },
     include: { task: true },
-    orderBy: [{ date: 'asc' }, { startHour: 'asc' }],
+    orderBy: [{ date: 'asc' }, { startHour: 'asc' }, { startMinute: 'asc' }],
   });
 
   return NextResponse.json(blocks);

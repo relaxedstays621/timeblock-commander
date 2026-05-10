@@ -12,33 +12,37 @@ type DbClient = PrismaClient | Prisma.TransactionClient;
  * been completed AND whose start has not yet elapsed. Used to express
  * "task has no live blocks" via Prisma's relation `none` filter:
  *
- *   blocks: { none: liveBlockFilter(todayStart, currentHour) }
+ *   blocks: { none: liveBlockFilter(todayStart, currentHour, currentMinute) }
  *
- * Hour granularity matters: a block dated *today* with `startHour <=
- * currentHour` has elapsed without being executed and is no longer live.
- * Without this, a 9 AM block at 8 PM would be treated as live, leaving its
- * task pinned to a SCHEDULED status the planner would then drop — exactly
- * the stale-scheduled symptom this predicate is meant to fix.
+ * :15-grid granularity: a block dated *today* whose
+ * `(startHour, startMinute) <= (currentHour, currentMinute)` has elapsed and
+ * is no longer live. The minute axis matters once blocks can land on :15,
+ * :30, or :45; without it a 9:45 block at 9:30 would be treated as past.
  *
  * Inputs:
  *   - `todayStart`: midnight UTC of the user's local calendar day, derived
  *     from `toLocalDateString(now, resolveTimezone(prefs))`.
- *   - `currentHour`: 0..23, the user's local hour-of-day, derived from
- *     `zonedHour(now, resolveTimezone(prefs))`.
+ *   - `currentHour`: 0..23, derived from `zonedHour(now, ...)`.
+ *   - `currentMinute`: 0..59, derived from `zonedMinute(now, ...)`.
  *
- * Live ⇔ (date strictly after today) OR (date == today AND startHour
- * strictly after currentHour). Blocks for the current hour are treated as
- * past, matching the convention in `rescheduleFromNow`.
+ * Live ⇔ (date strictly after today)
+ *      OR (date == today AND startHour strictly after currentHour)
+ *      OR (date == today AND startHour == currentHour AND startMinute
+ *          strictly after currentMinute).
+ * Blocks for the current :15 slot are treated as past, matching the
+ * convention in `rescheduleFromNow`.
  */
 export function liveBlockFilter(
   todayStart: Date,
   currentHour: number,
+  currentMinute: number,
 ): Prisma.TimeBlockWhereInput {
   return {
     completed: false,
     OR: [
       { date: { gt: todayStart } },
       { date: todayStart, startHour: { gt: currentHour } },
+      { date: todayStart, startHour: currentHour, startMinute: { gt: currentMinute } },
     ],
   };
 }

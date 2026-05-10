@@ -17,3 +17,12 @@
 export function toLocalDateString(d: Date = new Date(), timeZone?: string): string {
   return d.toLocaleDateString('en-CA', timeZone ? { timeZone } : undefined);
 }
+
+/**
+ * Round a minute count up to the next multiple of 15. Used to snap day-start
+ * times and drag/drop targets to the :15 grid the calendar renders on.
+ * 7:42 → 7:45, 7:45 → 7:45, 7:46 → 8:00.
+ */
+export function alignToFifteen(minutes: number): number {
+  return Math.ceil(minutes / 15) * 15;
+}

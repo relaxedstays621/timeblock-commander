@@ -2,15 +2,36 @@ import { Task, TimeBlock, Company, EnergyLevel, TaskStatus } from '@prisma/clien
 import { calculateScore } from './scoring';
 import { format, addDays, startOfWeek, startOfDay } from 'date-fns';
 
+// All scheduling math operates on a fixed :15 grid. Hours-only configs are
+// translated into slot indices internally (slot index = minute-of-day / 15).
+const SLOT_MIN = 15;
+const SLOTS_PER_HOUR = 60 / SLOT_MIN; // 4
+
+/**
+ * Grid slots that a block with this many minutes occupies. A block of 15
+ * minutes or less reserves 30 minutes (2 slots) of grid space — visual
+ * breathing room for tiny tasks and the rule the scope locks in. The
+ * duration value stored in the DB stays truthful; this affects only
+ * occupancy and placement math.
+ *
+ * Used symmetrically when building the occupied set from existing blocks
+ * AND when sizing a new placement, so a 15-min block at 9:00 prevents
+ * another 15-min block from landing at 9:15.
+ */
+function gridSlotsForDuration(durationMinutes: number): number {
+  if (durationMinutes <= SLOT_MIN) return 2;
+  return Math.max(1, Math.ceil(durationMinutes / SLOT_MIN));
+}
+
 // ─────────────────────────────────────────────────────────
 // SCHEDULER CONFIGURATION
 // ─────────────────────────────────────────────────────────
 
 export interface SchedulerConfig {
-  primeStart: number;       // e.g. 8
-  primeEnd: number;         // e.g. 12
-  dayStart: number;         // e.g. 6
-  dayEnd: number;           // e.g. 20
+  primeStart: number;       // hour, e.g. 8
+  primeEnd: number;         // hour, e.g. 12
+  dayStart: number;         // hour, e.g. 6
+  dayEnd: number;           // hour, e.g. 20
   breakMinutes: number;     // e.g. 15
   maxDailyMinutes: number;  // e.g. 600 (10h)
   workDays: number[];       // e.g. [1,2,3,4,5]
@@ -32,18 +53,14 @@ const DEFAULT_CONFIG: SchedulerConfig = {
 
 export interface ScheduleSlot {
   date: string;          // YYYY-MM-DD
-  startHour: number;
+  startHour: number;     // 0..23
+  startMinute: number;   // 0, 15, 30, 45
   durationMinutes: number;
   taskId: string;
   title: string;
   company: Company;
   taskType: string | null;
   score: number;
-}
-
-interface OccupiedSlot {
-  date: string;
-  hour: number;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -64,25 +81,32 @@ export function scheduleDay(
     .map((t) => ({ task: t, score: calculateScore(t) }))
     .sort((a, b) => b.score - a.score);
 
-  // Build occupied set from existing blocks
+  // Build occupied set from existing blocks, keyed by 15-minute slot index
+  // (slot index = (startHour * 60 + startMinute) / 15). Use
+  // gridSlotsForDuration for symmetry with new-task placement: a stored
+  // 15-min block reserves 2 slots so a future 15-min task can't land in
+  // the adjacent :15.
   const occupied = new Set<string>();
   for (const block of existingBlocks) {
     const blockDate = format(block.date, 'yyyy-MM-dd');
-    const slots = Math.ceil(block.durationMinutes / 60);
-    for (let i = 0; i < slots; i++) {
-      occupied.add(`${blockDate}-${block.startHour + i}`);
+    const startSlot = (block.startHour * 60 + block.startMinute) / SLOT_MIN;
+    const slotsTaken = gridSlotsForDuration(block.durationMinutes);
+    for (let i = 0; i < slotsTaken; i++) {
+      occupied.add(`${blockDate}-${startSlot + i}`);
     }
   }
 
-  // Build hour priority list
-  const primeHours = Array.from(
-    { length: config.primeEnd - config.primeStart },
-    (_, i) => config.primeStart + i
+  const dayStartSlot = config.dayStart * SLOTS_PER_HOUR;
+  const dayEndSlot = config.dayEnd * SLOTS_PER_HOUR;
+  const primeStartSlot = config.primeStart * SLOTS_PER_HOUR;
+  const primeEndSlot = config.primeEnd * SLOTS_PER_HOUR;
+
+  const allSlots = Array.from(
+    { length: dayEndSlot - dayStartSlot },
+    (_, i) => dayStartSlot + i
   );
-  const nonPrimeHours = Array.from(
-    { length: config.dayEnd - config.dayStart },
-    (_, i) => config.dayStart + i
-  ).filter((h) => h < config.primeStart || h >= config.primeEnd);
+  const primeSlots = allSlots.filter((s) => s >= primeStartSlot && s < primeEndSlot);
+  const nonPrimeSlots = allSlots.filter((s) => s < primeStartSlot || s >= primeEndSlot);
 
   const results: ScheduleSlot[] = [];
   let dailyMinutesUsed = existingBlocks
@@ -95,38 +119,39 @@ export function scheduleDay(
       continue;
     }
 
-    const slotsNeeded = Math.ceil(task.estimatedMinutes / 60);
+    const slotsNeeded = gridSlotsForDuration(task.estimatedMinutes);
+
     const needsPrime =
       task.energyLevel === EnergyLevel.PEAK ||
       task.energyLevel === EnergyLevel.HIGH ||
       score >= 70;
 
-    // Determine hour preference order
-    const hourOrder = needsPrime
-      ? [...primeHours, ...nonPrimeHours]
-      : [...nonPrimeHours, ...primeHours];
+    const slotOrder = needsPrime
+      ? [...primeSlots, ...nonPrimeSlots]
+      : [...nonPrimeSlots, ...primeSlots];
 
     // Find contiguous available slots
-    let placed = false;
-    for (const hour of hourOrder) {
-      if (hour + slotsNeeded > config.dayEnd) continue;
+    for (const startSlot of slotOrder) {
+      if (startSlot + slotsNeeded > dayEndSlot) continue;
 
       let canPlace = true;
       for (let s = 0; s < slotsNeeded; s++) {
-        if (occupied.has(`${dateStr}-${hour + s}`)) {
+        if (occupied.has(`${dateStr}-${startSlot + s}`)) {
           canPlace = false;
           break;
         }
       }
 
       if (canPlace) {
-        // Place the block
         for (let s = 0; s < slotsNeeded; s++) {
-          occupied.add(`${dateStr}-${hour + s}`);
+          occupied.add(`${dateStr}-${startSlot + s}`);
         }
+        const startHour = Math.floor(startSlot / SLOTS_PER_HOUR);
+        const startMinute = (startSlot % SLOTS_PER_HOUR) * SLOT_MIN;
         results.push({
           date: dateStr,
-          startHour: hour,
+          startHour,
+          startMinute,
           durationMinutes: task.estimatedMinutes,
           taskId: task.id,
           title: task.title,
@@ -135,7 +160,6 @@ export function scheduleDay(
           score,
         });
         dailyMinutesUsed += task.estimatedMinutes;
-        placed = true;
         break;
       }
     }
@@ -201,26 +225,44 @@ export function scheduleWeek(
 // When a new task arrives, only reschedule blocks that
 // haven't started yet. Never touch in-progress or completed.
 
+/**
+ * Operator-local "now" for rescheduleFromNow. The route is responsible for
+ * deriving these from the user's preferred timezone via toLocalDateString /
+ * zonedHour / zonedMinute. Passing them in (rather than reading
+ * `new Date()` here) keeps the past-block test correct when the server's
+ * TZ env differs from the operator's.
+ */
+export interface ReschedulerNow {
+  date: Date;          // a Date that represents "now" — used as scheduleWeek's startDate
+  todayStr: string;    // YYYY-MM-DD in the operator's local zone
+  currentHour: number; // 0..23 in the operator's local zone
+  currentMinute: number; // 0..59 in the operator's local zone
+}
+
 export function rescheduleFromNow(
   tasks: Task[],
   existingBlocks: TimeBlock[],
-  config: SchedulerConfig = DEFAULT_CONFIG
+  config: SchedulerConfig = DEFAULT_CONFIG,
+  now: ReschedulerNow,
 ): {
   keep: TimeBlock[];
   remove: TimeBlock[];
   add: ScheduleSlot[];
 } {
-  const now = new Date();
-  const currentHour = now.getHours();
-  const todayStr = format(now, 'yyyy-MM-dd');
+  const { todayStr, currentHour, currentMinute } = now;
 
-  // Split blocks: keep completed/in-progress/past, reschedule future
+  // Split blocks: keep completed/in-progress/past, reschedule future.
+  // "Past" is :15-aware so a 9:45 block at 9:30 is still future-live.
   const keep: TimeBlock[] = [];
   const remove: TimeBlock[] = [];
 
   for (const block of existingBlocks) {
     const blockDate = format(block.date, 'yyyy-MM-dd');
-    const isPast = blockDate < todayStr || (blockDate === todayStr && block.startHour <= currentHour);
+    const isPast =
+      blockDate < todayStr ||
+      (blockDate === todayStr &&
+        (block.startHour < currentHour ||
+          (block.startHour === currentHour && block.startMinute <= currentMinute)));
 
     if (block.completed || isPast) {
       keep.push(block);
@@ -230,7 +272,7 @@ export function rescheduleFromNow(
   }
 
   // Reschedule with only kept blocks as constraints
-  const add = scheduleWeek(tasks, keep, config, now);
+  const add = scheduleWeek(tasks, keep, config, now.date);
 
   return { keep, remove, add };
 }

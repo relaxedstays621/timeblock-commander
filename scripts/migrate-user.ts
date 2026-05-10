@@ -4,7 +4,7 @@
  *
  * Moves:
  *   - Task           (no unique constraint per-user → safe updateMany)
- *   - TimeBlock      (unique on userId, date, startHour — checked for collisions)
+ *   - TimeBlock      (unique on userId, date, startHour, startMinute — checked for collisions)
  *   - WeeklyGoal     (unique on userId, weekNumber, yearNumber — checked)
  *   - UserPreferences (unique on userId — only moved if target has none)
  *
@@ -62,25 +62,28 @@ async function main() {
     console.log('');
 
     // ─── Pre-check for collisions that updateMany can't resolve ────────────
-    // TimeBlock: unique(userId, date, startHour)
+    // TimeBlock: unique(userId, date, startHour, startMinute)
     const sourceBlocks = await prisma.timeBlock.findMany({
       where: { userId: source.id },
-      select: { date: true, startHour: true },
+      select: { date: true, startHour: true, startMinute: true },
     });
 
     const blockCollisions: string[] = [];
     for (const b of sourceBlocks) {
       const conflict = await prisma.timeBlock.findUnique({
         where: {
-          userId_date_startHour: {
+          userId_date_startHour_startMinute: {
             userId: target.id,
             date: b.date,
             startHour: b.startHour,
+            startMinute: b.startMinute,
           },
         },
       });
       if (conflict) {
-        blockCollisions.push(`${b.date.toISOString().slice(0, 10)} @ hour ${b.startHour}`);
+        blockCollisions.push(
+          `${b.date.toISOString().slice(0, 10)} @ ${String(b.startHour).padStart(2, '0')}:${String(b.startMinute).padStart(2, '0')}`,
+        );
       }
     }
 
