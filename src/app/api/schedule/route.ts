@@ -214,20 +214,36 @@ export async function POST(req: NextRequest) {
         // Clamp first slot only when scheduling today. Future days fall
         // back to config.dayStart; past days are out of bounds upstream.
         const isToday = dateStr === todayLocalStr;
+
+        // Must-today (item 05) only applies when the target date is
+        // today. For future-day schedules, strip must-today tasks from
+        // the pool entirely so they don't accidentally land on a future
+        // day — overflow stays in the queue, unscheduled.
+        const dayTasks = isToday
+          ? freshTasks
+          : freshTasks.filter((t) => !t.mustBeDoneToday);
+
         // Prime-eligible ids for this day: top-3 + pinned over the same
         // schedulable pool the scheduler is about to consider, so the
         // item-04 rule applies to the single-day path identically to
         // the week path.
         const primeEligibleTaskIds = computePrimeEligibleIds(
-          freshTasks.filter((t) => t.status === 'QUEUED' || t.status === 'BACKLOG'),
+          dayTasks.filter((t) => t.status === 'QUEUED' || t.status === 'BACKLOG'),
         );
+
+        // Must-today ids — only populate when scheduling today.
+        const mustTodayTaskIds = isToday
+          ? new Set<string>(dayTasks.filter((t) => t.mustBeDoneToday).map((t) => t.id))
+          : undefined;
+
         slots = scheduleDay(
-          freshTasks,
+          dayTasks,
           date,
           survivingBlocks,
           config,
           isToday ? earliestStartSlotForToday : undefined,
           primeEligibleTaskIds,
+          mustTodayTaskIds,
         );
       }
 

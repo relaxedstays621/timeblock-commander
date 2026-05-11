@@ -24,6 +24,10 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
   // slot. Captured here on creation; the user can still toggle it later
   // via PATCH /api/tasks/:id.
   const [userPinned, setUserPinned] = useState(false);
+  // Item-05 must-today: when true, the scheduler forces today placement
+  // and prefers non-prime hours (unless also pinned). Overflow returns
+  // to the queue, not tomorrow.
+  const [mustBeDoneToday, setMustBeDoneToday] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -41,6 +45,7 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
     setUrgency(5);
     setContext('');
     setUserPinned(false);
+    setMustBeDoneToday(false);
   };
 
   const submit = async () => {
@@ -63,6 +68,7 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
         source: 'QUICK_CAPTURE',
         status: 'BACKLOG',
         userPinned,
+        mustBeDoneToday,
       });
 
       reset();
@@ -167,23 +173,43 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
           </div>
         </div>
 
-        {/* Pin to prime hours */}
+        {/* Pin to prime hours + Must be done today */}
         <div>
-          <label className="block text-[11px] font-semibold text-white/40 tracking-wide mb-2">Priority pin</label>
-          <button
-            type="button"
-            className={`px-3 py-1.5 rounded-md text-[11px] font-semibold border transition-all flex items-center gap-1.5 ${
-              userPinned
-                ? 'bg-amber-400/15 text-amber-400 border-amber-400/30'
-                : 'text-white/50 bg-white/[0.04] border-white/[0.08] hover:border-white/20'
-            }`}
-            onClick={() => setUserPinned((p) => !p)}
-            aria-pressed={userPinned}
-          >
-            {userPinned ? '📌 Pinned — prime hours' : '📍 Pin to prime hours'}
-          </button>
+          <label className="block text-[11px] font-semibold text-white/40 tracking-wide mb-2">Priority flags</label>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              className={`px-3 py-1.5 rounded-md text-[11px] font-semibold border transition-all flex items-center gap-1.5 ${
+                userPinned
+                  ? 'bg-amber-400/15 text-amber-400 border-amber-400/30'
+                  : 'text-white/50 bg-white/[0.04] border-white/[0.08] hover:border-white/20'
+              }`}
+              onClick={() => setUserPinned((p) => !p)}
+              aria-pressed={userPinned}
+            >
+              {userPinned ? '📌 Pinned — prime hours' : '📍 Pin to prime hours'}
+            </button>
+            <button
+              type="button"
+              className={`px-3 py-1.5 rounded-md text-[11px] font-semibold border transition-all flex items-center gap-1.5 ${
+                mustBeDoneToday
+                  ? 'bg-rose-400/15 text-rose-300 border-rose-400/30'
+                  : 'text-white/50 bg-white/[0.04] border-white/[0.08] hover:border-white/20'
+              }`}
+              onClick={() => setMustBeDoneToday((m) => !m)}
+              aria-pressed={mustBeDoneToday}
+            >
+              {mustBeDoneToday ? '🔥 Today — non-prime first' : '⏰ Must be done today'}
+            </button>
+          </div>
           {userPinned && (
             <p className="mt-1.5 text-[10px] text-white/35">Score forced to 100; claims an 8a–12p slot.</p>
+          )}
+          {mustBeDoneToday && !userPinned && (
+            <p className="mt-1.5 text-[10px] text-white/35">Placed today, after 12p when possible. Overflow stays in queue.</p>
+          )}
+          {mustBeDoneToday && userPinned && (
+            <p className="mt-1.5 text-[10px] text-white/35">Pin overrides: still today, but in an 8a–12p slot.</p>
           )}
         </div>
 

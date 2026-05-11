@@ -97,6 +97,13 @@ export function computePrimeEligibleIds(tasks: Task[]): Set<string> {
  * rule. Callers should derive it via `computePrimeEligibleIds(tasks)`
  * once per scheduling pass and pass it down so the set is stable across
  * days within a week.
+ *
+ * `mustTodayTaskIds` is the set of task ids that must place today (item
+ * 05). When non-empty, those tasks run first in the placement order,
+ * before the prime-eligibles pass and the non-eligibles pass — so they
+ * claim slots ahead of competition. They prefer non-prime hours unless
+ * also `userPinned` (pin overrides). Callers should only pass this set
+ * when `date` is today; for future days, leave undefined.
  */
 export function scheduleDay(
   tasks: Task[],
@@ -105,6 +112,7 @@ export function scheduleDay(
   config: SchedulerConfig = DEFAULT_CONFIG,
   earliestStartSlot?: number,
   primeEligibleTaskIds?: Set<string>,
+  mustTodayTaskIds?: Set<string>,
 ): ScheduleSlot[] {
   const dateStr = format(date, 'yyyy-MM-dd');
 
@@ -152,18 +160,35 @@ export function scheduleDay(
     .filter((b) => format(b.date, 'yyyy-MM-dd') === dateStr)
     .reduce((sum, b) => sum + b.durationMinutes, 0);
 
-  // Two-pass placement (item 04 contract): prime-eligible tasks place
-  // FIRST, in score order, before any non-eligible runs. The earlier
-  // single-pass iteration could let a high-score non-eligible spill into
-  // prime (its [nonPrime, prime] fallback) ahead of a lower-score eligible
-  // that hadn't iterated yet, violating "top-3 or pinned own prime hours".
-  // Partitioning preserves within-group score order because `schedulable`
-  // is sorted; cross-group, eligibles always run first regardless of
-  // score. If `primeEligibleTaskIds` is omitted, the partition collapses
-  // (everyone is non-eligible) and behaviour matches the pre-item-04 pass.
-  const eligibles = schedulable.filter(({ task }) => primeEligibleTaskIds?.has(task.id));
-  const nonEligibles = schedulable.filter(({ task }) => !primeEligibleTaskIds?.has(task.id));
-  const ordered = [...eligibles, ...nonEligibles];
+  // Three-pass placement.
+  //
+  // Pass 1 — must-today (item 05): forced-today tasks claim slots first.
+  // They prefer non-prime hours unless also userPinned. Without this
+  // pass they would compete against prime-eligibles by raw score and
+  // could be displaced past end-of-day; item 05's contract is that they
+  // ALWAYS land today (or remain unscheduled, never spill to tomorrow).
+  //
+  // Pass 2 — prime-eligibles not already placed (item 04): top-3 union
+  // pinned, with prime-first slot order. Cross-group, this pass runs
+  // before non-eligibles regardless of score so a high-score non-
+  // eligible can't preempt a lower-score eligible.
+  //
+  // Pass 3 — non-eligibles: non-prime-first with prime as fallback.
+  // Pass-2 leftovers in prime can be claimed here, matching the
+  // checklist's "non-top-3 are excluded when prime is full" phrasing.
+  //
+  // Within each pass, score order is preserved (the source `schedulable`
+  // is already sorted desc). If a Set is undefined the corresponding
+  // partition collapses, so omitting both flags reduces to the original
+  // single-pass behaviour.
+  const mustToday = schedulable.filter(({ task }) => mustTodayTaskIds?.has(task.id));
+  const eligibles = schedulable.filter(({ task }) =>
+    !mustTodayTaskIds?.has(task.id) && primeEligibleTaskIds?.has(task.id),
+  );
+  const nonEligibles = schedulable.filter(({ task }) =>
+    !mustTodayTaskIds?.has(task.id) && !primeEligibleTaskIds?.has(task.id),
+  );
+  const ordered = [...mustToday, ...eligibles, ...nonEligibles];
 
   for (const { task, score } of ordered) {
     // Snap the task's estimate upward to the nearest :15 multiple. The
@@ -179,15 +204,20 @@ export function scheduleDay(
 
     const slotsNeeded = gridSlotsForDuration(task.estimatedMinutes);
 
-    // Prime eligibility is now strictly top-3 or user-pinned (item 04).
-    // The earlier energyLevel/score heuristic is gone — score still
-    // drives selectTop3 ordering, but no longer grants direct prime
-    // access. Non-eligible tasks may still land on prime slots if
-    // they're left over once eligibles are placed, but eligibles get
-    // first crack.
-    const needsPrime = primeEligibleTaskIds?.has(task.id) ?? false;
+    // Slot order:
+    //   - must-today + userPinned (item 04 + 05 interaction): pin wins,
+    //     prime-first.
+    //   - must-today, not pinned: non-prime-first per item 05.
+    //   - prime-eligible (top-3 ∪ pinned, not in must-today partition):
+    //     prime-first per item 04.
+    //   - everyone else: non-prime-first, prime as fallback.
+    const isMustToday = mustTodayTaskIds?.has(task.id) ?? false;
+    const isPrimeEligible = primeEligibleTaskIds?.has(task.id) ?? false;
+    const preferPrime = isMustToday
+      ? task.userPinned
+      : isPrimeEligible;
 
-    const slotOrder = needsPrime
+    const slotOrder = preferPrime
       ? [...primeSlots, ...nonPrimeSlots]
       : [...nonPrimeSlots, ...primeSlots];
 
@@ -265,6 +295,12 @@ export function scheduleWeek(
   // an earlier day already placed someone else.
   const primeEligibleTaskIds = computePrimeEligibleIds(scoredTasks.map((s) => s.task));
 
+  // Must-today (item 05): only today's iteration should see these tasks;
+  // a must-today that fails to fit today must NOT spill to tomorrow.
+  const mustTodayTaskIds = new Set<string>(
+    scoredTasks.filter(({ task }) => task.mustBeDoneToday).map(({ task }) => task.id),
+  );
+
   // Distribute tasks across work days
   for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
     const date = addDays(weekStart, dayOffset);
@@ -276,10 +312,15 @@ export function scheduleWeek(
 
     if (!config.workDays.includes(dayOfWeek)) continue;
 
-    // Filter to unscheduled tasks
-    const remaining = scoredTasks.filter(({ task }) => !scheduledTaskIds.has(task.id));
-
     const isToday = startOfDay(date).getTime() === todayStart.getTime();
+
+    // Filter to unscheduled tasks. Must-today tasks are excluded from
+    // non-today days so they can't slip into tomorrow when today's
+    // capacity runs out — overflow returns to the queue as unscheduled
+    // (item 05 contract; no auto-deferral).
+    const remaining = scoredTasks.filter(({ task }) =>
+      !scheduledTaskIds.has(task.id) && (isToday || !mustTodayTaskIds.has(task.id)),
+    );
 
     const daySlots = scheduleDay(
       remaining.map(({ task }) => task),
@@ -288,6 +329,7 @@ export function scheduleWeek(
       config,
       isToday ? earliestStartSlotForToday : undefined,
       primeEligibleTaskIds,
+      isToday ? mustTodayTaskIds : undefined,
     );
 
     for (const slot of daySlots) {
