@@ -16,16 +16,21 @@ Owner: matthewb621@gmail.com
 
 ## Audit Agent done
 
-- [ ] findings are ordered by severity and reported before any summary
-- [ ] each finding is grounded in concrete evidence or labeled as inference
-- [ ] verification gaps are named
-- [ ] missing tests are identified
-- [ ] no fixes were implemented unless explicitly reassigned
-- [ ] final recommendation is one of: accept, revise, block
+Two audit passes were conducted against this work:
+
+- **Pass 1** (against `113987f` + `ab2d737`): recommendation `Block`. High finding — `moveBlockWithCascade`'s reverse-new-slot-order update strategy hits a transient unique-constraint failure on `(userId, date, startHour, startMinute)` for backward moves. Concrete trace: `A` at slot 42, `B` at slot 40 (each 30-min); move `A` → 40 plans `A`→40, `B`→42; sorted reverse-new-slot the first statement writes `B` to slot 42, but slot 42 is still held by `A` and Postgres rejects with P2002. Resolved by `31658b2` (two-phase sentinel-date update: Phase 1 parks each updated row on `9999-12-31` with its final `(startHour, startMinute)`, Phase 2 returns each row's `date` to the real date; the cascade plan guarantees pairwise unique final slots so neither phase collides) plus `90fc261` (handoff updated to describe the two-phase approach and list the rejected alternatives — `DEFERRABLE` constraint requires a schema migration; delete-and-recreate loses `block.id`).
+- **Pass 2** (against `113987f` + `31658b2` + `ab2d737` + `90fc261`): recommendation `Revise` (bookkeeping only). Low finding — the two `Evidence scope` lines on this checklist (Task-specific and Out-of-scope) cited only `113987f`, not the audit-driven fix in `31658b2`. An auditor following those scope lines would have missed the constraint-safety fix. Resolved by this commit (both lines now cite `113987f` and `31658b2`). Audit Agent accepted on the condition that this update landed.
+
+- [x] findings are ordered by severity and reported before any summary
+- [x] each finding is grounded in concrete evidence or labeled as inference (Pass-1 finding includes the failing trace; Pass-2 finding cites the line locations)
+- [x] verification gaps are named (deferred manual desktop/mobile drag exercises remain behind the DB-credential blocker — same class of carry-over as items 01, 05, 06; backward-move cascade is now constraint-safe by reasoning but the live-DB exercise is also deferred)
+- [x] missing tests are identified (no test suite in repo; audit relied on tsc + reasoning trace through the cascade plan and the two-phase update order)
+- [x] no fixes were implemented unless explicitly reassigned (Dev applied `31658b2` for the Pass-1 Block and the stale-line corrections in this commit for the Pass-2 Revise)
+- [x] final recommendation is one of: accept, revise, block — `Accept` after the bookkeeping fix in this commit
 
 ## Task-specific verification
 
-Evidence scope for this section: commit `113987f` plus the bookkeeping commit landing this checklist update.
+Evidence scope for this section: commits `113987f` and `31658b2` (audit-driven cascade fix) plus the bookkeeping commit landing this checklist update.
 
 - [x] desktop drag/drop on a block updates start time on drop — `src/app/page.tsx` `onBlockPointerDown` installs window-level `pointermove`/`pointerup` handlers on grip pointerdown; on commit the client calls `moveBlock(blockId, newHour, newMinute)` (PUT `/api/blocks/[id]`), which routes through `moveBlockWithCascade` in `src/lib/blocks.ts` and persists `startHour`/`startMinute`.
 - [~] mobile touch-drag works without jitter on the same component — implementation uses `PointerEvent`, which unifies mouse and touch through one handler; the grip element carries Tailwind `touch-none` (CSS `touch-action: none`) so a touch drag on the handle does not trigger page scroll. Jitter check is **deferred** to a manual mobile session — the running app's DB-auth blocker keeps `todayBlocks` empty, so no draggable block renders end-to-end this session.
@@ -38,7 +43,7 @@ Evidence scope for this section: commit `113987f` plus the bookkeeping commit la
 
 ## Out-of-scope guardrails
 
-Evidence scope for this section: commit `113987f`.
+Evidence scope for this section: commits `113987f` and `31658b2`. Neither touches the guardrailed surfaces.
 
 - [x] no resize handles in this checklist (resize is not in scope) — no resize affordance added; `block.durationMinutes` is not mutated by the move endpoint or `moveBlockWithCascade`.
 - [x] no multi-select drag in this checklist — `draggingBlockId` is `string | null`, a single id; `onBlockPointerDown` operates on one block per pointerdown.
