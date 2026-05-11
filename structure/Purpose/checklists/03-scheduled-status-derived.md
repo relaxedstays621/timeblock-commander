@@ -25,7 +25,7 @@ Owner: matthewb621@gmail.com
 
 ## Task-specific verification
 
-Evidence scope for this section: commits `a27eec2` and `39c59a0`.
+Evidence scope for this section: commits `a27eec2`, `39c59a0`, and the audit-response fix `39ff38f`.
 
 - [x] task list query computes "scheduled" by checking blocks for today or this week (operator-local time) — `src/app/api/tasks/route.ts` GET derives `isScheduled` from a `prisma.timeBlock.findMany` keyed on `taskId IN (...)` and `date BETWEEN weekStart AND weekEnd`, with `weekStart`/`weekEnd` from `startOfWeek`/`endOfWeek` of the user's local today via `toLocalDateString(now, userTz)`
 - [x] task with a block this week → shows scheduled — true by construction; the `date BETWEEN weekStart AND weekEnd` filter matches any such block
@@ -33,11 +33,11 @@ Evidence scope for this section: commits `a27eec2` and `39c59a0`.
 - [x] task with a block today → shows scheduled regardless of week boundary — today is always inside `[startOfWeek..endOfWeek]` for the same date, so the range check satisfies the rule
 - [x] task with no blocks → shows unscheduled — `scheduledTaskIds` is empty for such tasks; `isScheduled` defaults to `false`
 - [x] week boundary respects ISO week (consistent with `scoring.ts` `getCurrentWeek`) — both use `weekStartsOn: 1` (Monday) via date-fns; `scoring.ts` uses `getISOWeek`, this route uses `startOfWeek`/`endOfWeek` with the same ISO convention
-- [x] no stored `status = SCHEDULED` write paths remain in the codebase, or stored status is documented as separate from the derived flag — the only write path (`src/app/api/schedule/route.ts` `updateMany` after block creation) is removed in `a27eec2`; comments in `schedule/route.ts`, `tasks/route.ts`, and `ui.tsx` document that stored status and the derived flag are separate. Read paths that still mention `SCHEDULED` in `status: { in: [...] }` filters are defensive for legacy rows and are explicitly documented as such. `StatusBadge` (`39c59a0`) additionally normalizes legacy stored `SCHEDULED` with `isScheduled=false` to display as `QUEUED`, so the visible state is never stale
+- [x] no stored `status = SCHEDULED` write paths remain in the codebase, or stored status is documented as separate from the derived flag — the scheduler's post-create `updateMany` is removed in `a27eec2`. **Audit follow-up (commit `39ff38f`):** `TaskStatusEnum` in `src/lib/schemas.ts` no longer accepts `'SCHEDULED'`, so `PATCH /api/tasks/:id` rejects any client attempt to write that value at validation. `TaskDetailModal` (`src/app/page.tsx`) additionally normalizes legacy `task.status === 'SCHEDULED'` to `'QUEUED'` in its local state on init so a no-op Update click cannot round-trip the legacy value. Comments in `schedule/route.ts`, `tasks/route.ts`, `schemas.ts`, `ui.tsx`, and `page.tsx` document that stored status and the derived flag are separate. The Prisma `TaskStatus` enum still carries `SCHEDULED` for backward compatibility with legacy rows; no new write path produces it. `StatusBadge` (`39c59a0`) normalizes legacy stored `SCHEDULED` with `isScheduled=false` to display as `QUEUED`, so the visible state is never stale
 
 ## Out-of-scope guardrails
 
-Evidence scope for this section: commits `a27eec2` and `39c59a0`.
+Evidence scope for this section: commits `a27eec2`, `39c59a0`, and `39ff38f`.
 
 - [x] no schema migration that changes the existing `TaskStatus` enum unless required — `prisma/schema.prisma` `TaskStatus` enum is unchanged; `SCHEDULED` is preserved for backward compatibility with legacy rows. No `db:push` required for item 03
 - [x] no UI redesign of the task list beyond the scheduled-flag fix — only changes in `src/app/page.tsx` are: pass `task.isScheduled` to `StatusBadge`, and remove `SCHEDULED` from the manual status dropdown. List layout and styling untouched
