@@ -11,10 +11,14 @@ export const TaskTypeEnum = z.enum(['PROMOTION', 'DELIVERING', 'BUILDING']);
 
 export const EnergyLevelEnum = z.enum(['LOW', 'MEDIUM', 'HIGH', 'PEAK']);
 
+// 'SCHEDULED' is intentionally excluded from the input enum as of item 03
+// of the daily-planning scope. "Scheduled" is a derived flag computed at
+// read time from blocks-this-week; it must not be settable via task create
+// or update. The Prisma TaskStatus enum still carries SCHEDULED so legacy
+// rows continue to read correctly, but no API call can write that value.
 export const TaskStatusEnum = z.enum([
   'BACKLOG',
   'QUEUED',
-  'SCHEDULED',
   'IN_PROGRESS',
   'COMPLETE',
   'DEFERRED',

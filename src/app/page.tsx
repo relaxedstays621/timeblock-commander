@@ -912,7 +912,11 @@ function SettingsView() {
 // ─────────────────────────────────────────────────────────
 
 function TaskDetailModal({ task, onClose, onUpdate }: any) {
-  const [status, setStatus] = useState(task.status);
+  // Normalize legacy stored SCHEDULED to QUEUED on init so the modal can
+  // never round-trip a SCHEDULED write back to the API. The TaskStatusEnum
+  // (schemas.ts) also rejects SCHEDULED at validation, but normalizing
+  // here means the user doesn't see a confusing 400 on Update.
+  const [status, setStatus] = useState(task.status === 'SCHEDULED' ? 'QUEUED' : task.status);
   // "Scheduled" is derived from the task's blocks, not manually selectable.
   // See item 03 of the daily-planning scope and GET /api/tasks isScheduled.
   const statuses = ['BACKLOG', 'QUEUED', 'IN_PROGRESS', 'COMPLETE', 'DEFERRED', 'DROPPED'];
