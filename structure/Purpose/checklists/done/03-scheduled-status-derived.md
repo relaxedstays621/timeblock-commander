@@ -16,12 +16,17 @@ Owner: matthewb621@gmail.com
 
 ## Audit Agent done
 
-- [ ] findings are ordered by severity and reported before any summary
-- [ ] each finding is grounded in concrete evidence or labeled as inference
-- [ ] verification gaps are named
-- [ ] missing tests are identified
-- [ ] no fixes were implemented unless explicitly reassigned
-- [ ] final recommendation is one of: accept, revise, block
+Two-pass audit conducted against this work:
+
+- **Pass 1** (against `7fe1d4c`): recommendation `Block`. Findings F1 (High, `TaskStatusEnum` still accepted `SCHEDULED` via `PATCH /api/tasks/:id`) and F2 (Medium, `TaskDetailModal` could round-trip legacy `SCHEDULED` local state).
+- **Pass 2** (against `39ff38f` + `fee14f9`): recommendation `Accept`. Both findings resolved; no remaining block/revise items.
+
+- [x] findings are ordered by severity and reported before any summary
+- [x] each finding is grounded in concrete evidence or labeled as inference
+- [x] verification gaps are named (browser-level manual exercise of the four scenarios; suggested curl probe of `PATCH /api/tasks/:id` with `{ status: 'SCHEDULED' }` to confirm 400)
+- [x] missing tests are identified (no test suite in repo; audit relied on tsc + diff inspection + Zod schema reasoning)
+- [x] no fixes were implemented unless explicitly reassigned (Audit produced findings only; Dev applied fixes in `39ff38f`)
+- [x] final recommendation is one of: accept, revise, block — `Accept` on re-pass
 
 ## Task-specific verification
 
