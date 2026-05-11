@@ -236,12 +236,27 @@ export interface MoveBlockResult {
  * Ownership is enforced on the moved block; the same-day block list is
  * always scoped to the same userId.
  *
- * The update order matters: Postgres checks unique constraints
- * `(userId, date, startHour, startMinute)` per statement, so we sort
- * UPDATEs in reverse-new-slot order. Each statement writes a slot that
- * has just been vacated by a later-in-the-iteration update, so there's
- * no transient collision. Unscheduled blocks are deleted before the
- * UPDATEs so their old slots are free first.
+ * Postgres checks the unique constraint
+ * `(userId, date, startHour, startMinute)` per statement, so we cannot
+ * write the placed updates straight to their final slots — a backward
+ * move (A: 42→40, B: 40→42) would write B to slot 42 before A vacates
+ * it. The fix is two-phase via a sentinel date:
+ *
+ *   Phase 1 — for each block whose slot changes, UPDATE it to a
+ *   sentinel date (`9999-12-31`) with its FINAL (startHour, startMinute).
+ *   The cascade plan guarantees the final (hour, minute) pairs are
+ *   pairwise unique among the updates, so no Phase-1 statement collides
+ *   on the sentinel date.
+ *
+ *   Phase 2 — for each block, UPDATE its `date` back to the real date.
+ *   At this point the real date holds only blocks whose slots didn't
+ *   change (those are untouched and already at their final positions,
+ *   and the cascade guarantees the final positions of moved blocks are
+ *   disjoint from the unchanged ones). Each return to the real date
+ *   therefore lands on a free slot.
+ *
+ * Unscheduled blocks are deleted before Phase 1 so their real slots
+ * are free first.
  *
  * Tasks attached to unscheduled blocks are reverted from SCHEDULED /
  * IN_PROGRESS to QUEUED — mirrors the pattern in `clearBlocks`.
@@ -294,25 +309,41 @@ export async function moveBlockWithCascade(
     ]),
   );
 
-  const updates = plan.placed
-    .filter((p) => currentSlot.get(p.id) !== p.startSlot)
-    .sort((a, b) => b.startSlot - a.startSlot); // reverse new-slot order
+  const updates = plan.placed.filter((p) => currentSlot.get(p.id) !== p.startSlot);
 
   const unscheduledIds = plan.unscheduled.map((u) => u.id);
   const unscheduledTaskIds = plan.unscheduled
     .map((u) => u.taskId)
     .filter((id): id is string => Boolean(id));
 
+  // Sentinel date for the two-phase update — see the function JSDoc for
+  // why. Any far-future date works; the only requirement is that no
+  // real block exists there for this user.
+  const SENTINEL_DATE = new Date('9999-12-31T00:00:00.000Z');
+
   await db.$transaction(async (tx) => {
     if (unscheduledIds.length > 0) {
       await tx.timeBlock.deleteMany({ where: { id: { in: unscheduledIds } } });
     }
+    // Phase 1: park each updated row on the sentinel date with its
+    // FINAL (startHour, startMinute). Vacates the real slot; cannot
+    // collide on the sentinel because final pairs are unique by plan.
     for (const u of updates) {
       const newHour = Math.floor(u.startSlot / SLOTS_PER_HOUR);
       const newMinute = (u.startSlot % SLOTS_PER_HOUR) * SLOT_MIN;
       await tx.timeBlock.update({
         where: { id: u.id },
-        data: { startHour: newHour, startMinute: newMinute },
+        data: { date: SENTINEL_DATE, startHour: newHour, startMinute: newMinute },
+      });
+    }
+    // Phase 2: move each row from the sentinel back to the real date.
+    // Slot fields are already at their final values, so this UPDATE
+    // changes only `date`. No collisions on the real date — final
+    // positions are disjoint from the unchanged blocks.
+    for (const u of updates) {
+      await tx.timeBlock.update({
+        where: { id: u.id },
+        data: { date: moved.date },
       });
     }
     if (unscheduledTaskIds.length > 0) {
