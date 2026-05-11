@@ -88,7 +88,10 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
       <div className="space-y-4">
         <input
           ref={inputRef}
-          className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.12] rounded-lg text-[15px] font-medium text-white placeholder:text-white/30"
+          // text-[16px] is the iOS Safari threshold: anything smaller
+          // triggers an auto-zoom on focus, which causes a layout shift
+          // and is the headline mobile-capture pain in item 08.
+          className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.12] rounded-lg text-[16px] font-medium text-white placeholder:text-white/30"
           placeholder="What needs to get done?"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -215,7 +218,9 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
 
         {/* Context */}
         <textarea
-          className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-[13px] text-white placeholder:text-white/25 resize-y font-[inherit]"
+          // text-[16px] for the same iOS auto-zoom-on-focus reason as the
+          // title input above (item 08).
+          className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-[16px] text-white placeholder:text-white/25 resize-y font-[inherit]"
           placeholder="Any context? (optional)"
           value={context}
           onChange={(e) => setContext(e.target.value)}

@@ -5,7 +5,7 @@ import { scheduleDay, scheduleWeek, rescheduleFromNow, computePrimeEligibleIds }
 import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } from '@/lib/scoring';
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
-import { clearBlocks, liveBlockFilter } from '@/lib/blocks';
+import { liveBlockFilter } from '@/lib/blocks';
 import { resolveTimezone, zonedHour, zonedMinute } from '@/lib/timezone';
 import { toLocalDateString } from '@/lib/local-date';
 import type { TaskType } from '@prisma/client';
@@ -168,15 +168,11 @@ export async function POST(req: NextRequest) {
         const weekStart = startOfWeek(date, { weekStartsOn: 1 });
         const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
 
-        await clearBlocks(tx, {
-          userId: user.id,
-          range: { gte: weekStart, lte: weekEnd },
-        });
+        // Item 09: Schedule Week is additive — no clearBlocks call.
+        // Existing blocks in the week are immutable survivors that the
+        // planner packs around. The eligibility filter below prevents
+        // re-placing tasks that already have a live block in the range.
 
-        // Fetch tasks AFTER both the sweep and clearBlocks so the planner
-        // observes the fully-reset state. A snapshot taken any earlier
-        // would still report tasks that just had their blocks deleted as
-        // SCHEDULED, and scheduleWeek's filter would drop them.
         const freshTasks = await tx.task.findMany({
           where: {
             userId: user.id,
@@ -188,18 +184,43 @@ export async function POST(req: NextRequest) {
           where: { userId: user.id },
         });
 
-        slots = scheduleWeek(freshTasks, survivingBlocks, config, date, earliestStartSlotForToday);
+        // Item 09 task-eligibility filter. Mirrors liveBlockFilter
+        // semantics in code so we can apply it to the in-memory block set:
+        // a block gates eligibility iff it is non-completed AND its slot
+        // is today-or-future. scheduleWeek already skips past days, so
+        // past-day blocks for an unscheduled task are irrelevant. The
+        // today-special-case requires the slot to still be ahead of now.
+        const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
+        const alreadyScheduledTaskIds = new Set<string>(
+          survivingBlocks
+            .filter((b) => {
+              if (b.completed) return false;
+              const blockDateStr = format(b.date, 'yyyy-MM-dd');
+              if (blockDateStr < todayLocalStr || blockDateStr > weekEndStr) return false;
+              if (blockDateStr === todayLocalStr) {
+                return (
+                  b.startHour > currentHour ||
+                  (b.startHour === currentHour && b.startMinute > currentMinute)
+                );
+              }
+              return true;
+            })
+            .map((b) => b.taskId)
+            .filter((id): id is string => Boolean(id)),
+        );
+
+        const eligibleTasks = freshTasks.filter((t) => !alreadyScheduledTaskIds.has(t.id));
+
+        slots = scheduleWeek(eligibleTasks, survivingBlocks, config, date, earliestStartSlotForToday);
       } else {
         const dateStr = format(date, 'yyyy-MM-dd');
-        const targetDate = new Date(dateStr);
 
-        await clearBlocks(tx, {
-          userId: user.id,
-          range: targetDate,
-        });
+        // Item 09: Schedule Today is additive — no clearBlocks call.
+        // Existing blocks for the target date are immutable survivors
+        // that scheduleDay packs around (via its `occupied` set). The
+        // eligibility filter below prevents re-placing tasks that
+        // already hold a live block on this date.
 
-        // See note in the 'week' branch — fetch post-sweep + post-clear so
-        // the planner sees QUEUED-reset statuses.
         const freshTasks = await tx.task.findMany({
           where: {
             userId: user.id,
@@ -215,13 +236,34 @@ export async function POST(req: NextRequest) {
         // back to config.dayStart; past days are out of bounds upstream.
         const isToday = dateStr === todayLocalStr;
 
+        // Item 09 task-eligibility filter. A task is ineligible iff it
+        // already has a live block on the target date. For today, "live"
+        // requires the slot to still be ahead of now (matches
+        // liveBlockFilter). For a future day, any non-completed block on
+        // that date counts.
+        const alreadyScheduledTaskIds = new Set<string>(
+          survivingBlocks
+            .filter((b) => {
+              if (b.completed) return false;
+              if (format(b.date, 'yyyy-MM-dd') !== dateStr) return false;
+              if (!isToday) return true;
+              return (
+                b.startHour > currentHour ||
+                (b.startHour === currentHour && b.startMinute > currentMinute)
+              );
+            })
+            .map((b) => b.taskId)
+            .filter((id): id is string => Boolean(id)),
+        );
+
         // Must-today (item 05) only applies when the target date is
         // today. For future-day schedules, strip must-today tasks from
         // the pool entirely so they don't accidentally land on a future
         // day — overflow stays in the queue, unscheduled.
-        const dayTasks = isToday
+        const dayTasks = (isToday
           ? freshTasks
-          : freshTasks.filter((t) => !t.mustBeDoneToday);
+          : freshTasks.filter((t) => !t.mustBeDoneToday)
+        ).filter((t) => !alreadyScheduledTaskIds.has(t.id));
 
         // Prime-eligible ids for this day: top-3 + pinned over the same
         // schedulable pool the scheduler is about to consider, so the
@@ -284,6 +326,10 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     scheduled: created.length,
+    // Item 09: client surfaces a "Nothing new to schedule" toast when this
+    // is true. The flag is true whenever the planner produced zero new
+    // placements — distinguishes the success-but-no-op case from an error.
+    nothingNew: created.length === 0,
     blocks: created,
     insights: {
       top3: top3.map((t) => ({

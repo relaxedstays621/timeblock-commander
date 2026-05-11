@@ -21,6 +21,10 @@ export default function DashboardPage() {
   const [quickCapture, setQuickCapture] = useState(false);
   const [selectedTask, setSelectedTask] = useState<any | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  // Item 09: distinct from errorBanner — surfaces neutral notices such as
+  // "Nothing new to schedule" so a no-op Schedule press is visibly
+  // confirmed instead of looking like the button didn't fire.
+  const [infoBanner, setInfoBanner] = useState<string | null>(null);
 
   // `now` ticks every minute so "today" and current-hour highlighting
   // advance even when the page is left open.
@@ -45,10 +49,22 @@ export default function DashboardPage() {
     setTimeout(() => setErrorBanner(null), 6000);
   }, []);
 
+  const reportInfo = useCallback((message: string) => {
+    setInfoBanner(message);
+    setTimeout(() => setInfoBanner(null), 4000);
+  }, []);
+
   const handleSchedule = async (action: 'day' | 'week' | 'reschedule') => {
     try {
-      await triggerSchedule(action);
+      const result = await triggerSchedule(action);
       refreshAll();
+      // Item 09: distinguish the success-but-no-op case so a re-press of
+      // Schedule Today/Week with everything already scheduled is visibly
+      // confirmed instead of silent. The server returns `nothingNew: true`
+      // when zero blocks were created.
+      if (result?.nothingNew) {
+        reportInfo('Nothing new to schedule.');
+      }
     } catch (e: any) {
       reportError(e?.message ?? 'Failed to schedule');
     }
@@ -117,7 +133,14 @@ export default function DashboardPage() {
       {/* ─── HEADER ─── */}
       <header className="flex justify-between items-center px-5 py-3 bg-surface-0/95 border-b border-white/[0.06] sticky top-0 z-[100] backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <button className="text-xl text-white/70 md:hidden" onClick={() => setMobileNav(!mobileNav)}>☰</button>
+          <button
+            className="text-2xl text-white/90 md:hidden min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center"
+            aria-label={mobileNav ? 'Close menu' : 'Open menu'}
+            aria-expanded={mobileNav}
+            onClick={() => setMobileNav(!mobileNav)}
+          >
+            ☰
+          </button>
           <div className="flex items-center gap-2">
             <span className="text-xl text-accent-red">◈</span>
             <span className="text-sm font-bold tracking-[3px]">TIMEBLOCK</span>
@@ -125,21 +148,21 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            className="bg-accent-red text-white px-4 py-2 rounded-lg text-[13px] font-semibold tracking-wide"
+            className="bg-accent-red text-white px-4 py-2 rounded-lg text-[13px] font-semibold tracking-wide min-h-[44px]"
             onClick={() => setQuickCapture(true)}
           >
             + Capture
           </button>
           {session ? (
             <button
-              className="text-[12px] text-white/50 hover:text-white/80 px-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-lg"
+              className="text-[12px] text-white/80 hover:text-white/95 px-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-lg min-h-[44px]"
               onClick={() => signOut()}
             >
               {session.user?.email?.split('@')[0]} ↗
             </button>
           ) : (
             <button
-              className="text-[12px] text-white px-3 py-2 bg-emerald-600 rounded-lg font-semibold"
+              className="text-[12px] text-white px-3 py-2 bg-emerald-600 rounded-lg font-semibold min-h-[44px]"
               onClick={() => signIn('google')}
             >
               Sign in
@@ -155,6 +178,13 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {infoBanner && (
+        <div className="px-5 py-2 bg-sky-500/[0.10] border-b border-sky-500/20 text-[12px] text-sky-200 flex justify-between items-center">
+          <span>{infoBanner}</span>
+          <button className="text-sky-200/70 hover:text-sky-200" onClick={() => setInfoBanner(null)}>✕</button>
+        </div>
+      )}
+
       <div className="flex flex-1">
         {/* ─── SIDEBAR ─── */}
         <nav className={`w-[260px] bg-surface-1/98 border-r border-white/[0.06] py-4 overflow-y-auto flex-shrink-0 fixed top-[52px] bottom-0 left-0 z-[90] transition-transform duration-300 ${mobileNav ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
@@ -163,10 +193,10 @@ export default function DashboardPage() {
             {navItems.map((item) => (
               <button
                 key={item.key}
-                className={`flex items-center gap-2.5 w-full px-3 py-2.5 rounded-md text-[13px] text-left mb-0.5 transition-all ${
+                className={`flex items-center gap-2.5 w-full px-3 py-2.5 min-h-[44px] rounded-md text-[13px] text-left mb-0.5 transition-all ${
                   view === item.key
                     ? 'bg-accent-red/[0.12] text-accent-red'
-                    : 'text-white/50 hover:text-white/70 hover:bg-white/[0.04]'
+                    : 'text-white/80 hover:text-white/95 hover:bg-white/[0.04]'
                 }`}
                 onClick={() => { setView(item.key); setMobileNav(false); }}
               >
@@ -178,13 +208,13 @@ export default function DashboardPage() {
 
           <div className="px-4 mb-4">
             <SectionLabel>Actions</SectionLabel>
-            <button className="block w-full text-left px-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-md text-[12px] text-white/60 hover:text-white/80 mb-1" onClick={() => handleSchedule('day')}>
+            <button className="block w-full text-left px-3 py-2 min-h-[44px] bg-white/[0.04] border border-white/[0.08] rounded-md text-[12px] text-white/85 hover:text-white/95 mb-1" onClick={() => handleSchedule('day')}>
               ↻ Schedule Today
             </button>
-            <button className="block w-full text-left px-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-md text-[12px] text-white/60 hover:text-white/80 mb-1" onClick={() => handleSchedule('week')}>
+            <button className="block w-full text-left px-3 py-2 min-h-[44px] bg-white/[0.04] border border-white/[0.08] rounded-md text-[12px] text-white/85 hover:text-white/95 mb-1" onClick={() => handleSchedule('week')}>
               ▦ Schedule Week
             </button>
-            <button className="block w-full text-left px-3 py-2 bg-red-500/[0.08] border border-red-500/[0.15] rounded-md text-[12px] text-red-400/70 hover:text-red-400" onClick={async () => {
+            <button className="block w-full text-left px-3 py-2 min-h-[44px] bg-red-500/[0.08] border border-red-500/[0.15] rounded-md text-[12px] text-red-300 hover:text-red-200" onClick={async () => {
               if (confirm('Clear all unfinished blocks for today?')) {
                 await fetch(`/api/blocks?date=${toLocalDateString()}`, { method: 'DELETE' });
                 refreshAll();
