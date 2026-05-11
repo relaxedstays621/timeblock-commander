@@ -33,6 +33,16 @@ Add concrete checks for this task. Examples: commands, files to inspect, behavio
 - [ ] <observable behavior — replace>
 - [ ] <regression check — replace>
 
+For **deployment tasks** specifically, smoke must prove the auth path, not
+just that the server is up. Root `200` plus an unauthenticated `401` on a
+gated route is insufficient — both can pass while Prisma is failing to
+initialize against the DB (the auth callback was the only code path exercising
+the adapter, and it only fires after Google completes the OAuth handshake).
+A redacted DB connectivity probe such as `docker exec <app-container> node -e
+"<prisma raw SELECT 1>"` is the minimum bar; see
+`session-handoffs/2026-05-11-auth-callback-incident.md` for the underlying
+incident.
+
 ## Out-of-scope guardrails
 
 Items the agent must explicitly **not** have done.
