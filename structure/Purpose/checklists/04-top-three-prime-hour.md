@@ -6,13 +6,13 @@ Owner: matthewb621@gmail.com
 
 ## Development Agent done
 
-- [ ] requested change is implemented, or the blocker is stated
-- [ ] changes are scoped to the stated area
-- [ ] unrelated user or runtime changes are preserved
-- [ ] existing project patterns are followed
-- [ ] verification was run, or not-run status is explained
-- [ ] changed files are listed in the handoff
-- [ ] residual risks and follow-ups are named
+- [x] requested change is implemented, or the blocker is stated
+- [x] changes are scoped to the stated area
+- [x] unrelated user or runtime changes are preserved
+- [x] existing project patterns are followed
+- [x] verification was run, or not-run status is explained
+- [x] changed files are listed in the handoff
+- [x] residual risks and follow-ups are named
 
 ## Audit Agent done
 
@@ -25,21 +25,26 @@ Owner: matthewb621@gmail.com
 
 ## Task-specific verification
 
-- [ ] `calculateScore` returns 100 when `task.userPinned === true` (early return; other components still compute for diagnostics if useful, but the returned value is 100)
-- [ ] `selectTop3` continues to apply the company-spread heuristic, with pinned tasks naturally rising due to score
-- [ ] scheduler places top-3 into prime hours (8am–12pm operator-local) before any other tasks
-- [ ] non-top-3, non-pinned tasks are excluded from prime-hour placement when prime is full
-- [ ] when more than 3 tasks are pinned, all of them claim prime hours up to capacity, then overflow goes to non-prime
-- [ ] unit-level reasoning trace: a pinned reactive task still scores 100 (pin overrides reactive penalty)
+Evidence scope for this section: commit `caafbbe`.
+
+- [x] `calculateScore` returns 100 when `task.userPinned === true` (early return; other components still compute for diagnostics if useful, but the returned value is 100) — `src/lib/scoring.ts`: `if (task.userPinned) return 100;` is the first statement after the docstring; nothing else mutates the return when the pin is set
+- [x] `selectTop3` continues to apply the company-spread heuristic, with pinned tasks naturally rising due to score — `src/lib/scoring.ts` `selectTop3` is untouched; the score-sort + company-spread heuristic remains. Pinned tasks now score 100 so they sort to the top first, and the company-spread pass picks them subject to the same rules
+- [x] scheduler places top-3 into prime hours (8am–12pm operator-local) before any other tasks — `src/lib/scheduler.ts` `scheduleDay` iterates tasks in score-descending order; for each task, `needsPrime = primeEligibleTaskIds.has(task.id)` decides whether the slot search starts with prime or non-prime. The primeEligibleTaskIds Set is computed once per scheduling pass over the schedulable pool via `computePrimeEligibleIds` and contains exactly the top-3 (plus any pinned overflow)
+- [x] non-top-3, non-pinned tasks are excluded from prime-hour placement when prime is full — these tasks have `needsPrime = false`, so their slot order is `[non-prime, prime]`. If top-3/pinned consume all prime slots, the only remaining slots are non-prime; if prime has leftovers, non-eligibles can claim them after eligibles have placed
+- [x] when more than 3 tasks are pinned, all of them claim prime hours up to capacity, then overflow goes to non-prime — `computePrimeEligibleIds` is a UNION of `selectTop3` (capped at 3) and `tasks.filter(userPinned)` (no cap). Pinned tasks beyond the top-3 are still in the set; they iterate in score order and grab prime slots until prime is full, then naturally fall back to non-prime via the contiguous-slot fallback in the placement loop
+- [x] unit-level reasoning trace: a pinned reactive task still scores 100 (pin overrides reactive penalty) — `calculateScore` early-returns before the reactive penalty branch (`task.isReactive && task.urgency < 7 → score -= 5`) is reached. Pin always wins
 
 ## Out-of-scope guardrails
 
-- [ ] no change to the must-be-done-today placement rule (item 05 owns that)
-- [ ] no change to drag/drop behavior (item 07)
-- [ ] no UI changes beyond surfacing the pin state on the capture form
-- [ ] composite-score formula for non-pinned tasks is unchanged
+Evidence scope for this section: commit `caafbbe`.
+
+- [x] no change to the must-be-done-today placement rule (item 05 owns that) — `mustBeDoneToday` is now writable via `CreateTaskSchema`/`UpdateTaskSchema` so the capture form/PATCH can set it, but no scheduler placement code consumes the field. Placement logic for `mustBeDoneToday` is explicitly left to item 05
+- [x] no change to drag/drop behavior (item 07) — no drag-event handlers added or modified
+- [x] no UI changes beyond surfacing the pin state on the capture form — only `src/components/QuickCapture.tsx` gained a pin toggle button. No edits to `TaskDetailModal`, `TodayView`, `WeekView`, `QueueView`, or `AnalyticsView`. The `mustBeDoneToday` field is accepted by the schema but the capture form does not yet expose a toggle for it (item 05 owns that UI)
+- [x] composite-score formula for non-pinned tasks is unchanged — the body of `calculateScore` after the `userPinned` early return is byte-identical to the pre-item-04 version
 
 ## Handoff readiness
 
-- [ ] active session handoff under `../session-handoffs/` records the score override and prime-hour rule
-- [ ] git branch and commit are recorded in the handoff
+- [x] active session handoff under `../session-handoffs/` records the score override and prime-hour rule — see `2026-05-11-item-04-top-three-prime-hour.md`
+- [x] git branch and commit are recorded in the handoff
+- [x] this checklist and its session handoff are committed (not `M` or `??`) before requesting the Audit Agent — see `../delegation-contract.md` "Bookkeeping Artifact Commit Policy"
