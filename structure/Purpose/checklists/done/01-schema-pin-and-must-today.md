@@ -16,12 +16,20 @@ Owner: matthewb621@gmail.com
 
 ## Audit Agent done
 
-- [ ] findings are ordered by severity and reported before any summary
-- [ ] each finding is grounded in concrete evidence or labeled as inference
-- [ ] verification gaps are named
-- [ ] missing tests are identified
-- [ ] no fixes were implemented unless explicitly reassigned
-- [ ] final recommendation is one of: accept, revise, block
+Two audit passes were conducted against this work:
+
+- **Pass 1** (against `44c5e8b` plus the then-uncommitted checklist and session handoff): recommendation `Revise`. Findings, severity-ordered:
+  - **High (process)** — checklist and session handoff were uncommitted (`M`/`??`) when presented for audit. Audit cannot cite uncommitted bookkeeping durably (working tree can be reset/stashed/overwritten between audit and accept). Surfaced the broader gap; closed by `0717cc6` (new "Bookkeeping Artifact Commit Policy" in `delegation-contract.md`, plus `_template.md` handoff-readiness row and README pointers under `checklists/` and `session-handoffs/`).
+  - **Medium (accuracy)** — the task-specific typecheck row was originally ticked `[x]` even though `tsc --noEmit` exited non-zero because of pre-existing `googleapis` / `google-auth-library` missing-module errors. Item-01's own surface compiles cleanly, but the full-repo typecheck is blocked. Closed by `20a587d` (row downgraded to `[~]` with an explanation that names the unrelated modules).
+  - **Medium (scope hygiene)** — the out-of-scope guardrails section conflated the commit's evidence with the active working tree, which carried unrelated item-02 drift across `scripts/`, `src/app/api/`, and `src/lib/`. A future reviewer could read working-tree state as part of item 01. Closed by `20a587d` (section now explicitly scopes its evidence to commit `44c5e8b`).
+- **Pass 2** (against `44c5e8b` + `20a587d` + `0717cc6`): recommendation `Accept`. All three Pass-1 findings resolved. Two `[~]` partial rows remain documented gaps (full-repo typecheck blocked by unrelated deps; `prisma/seed.ts` runtime not exercised) — accepted as known carry-overs, not blockers.
+
+- [x] findings are ordered by severity and reported before any summary
+- [x] each finding is grounded in concrete evidence or labeled as inference
+- [x] verification gaps are named (full-repo `tsc --noEmit` blocked by unrelated `googleapis` / `google-auth-library` deps; `prisma/seed.ts` runtime not exercised; live-DB `npm run db:push` on the host unverified — `prisma db pull` currently fails P1000 against user `timeblock`, separate operator action)
+- [x] missing tests are identified (no test suite in repo; audit relied on schema inspection, `prisma generate`, and reasoning trace)
+- [x] no fixes were implemented unless explicitly reassigned (Dev applied `20a587d` for the checklist findings and `0717cc6` for the process-level finding)
+- [x] final recommendation is one of: accept, revise, block — `Accept` on the second pass
 
 ## Task-specific verification
 
