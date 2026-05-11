@@ -99,11 +99,13 @@ export function computePrimeEligibleIds(tasks: Task[]): Set<string> {
  * days within a week.
  *
  * `mustTodayTaskIds` is the set of task ids that must place today (item
- * 05). When non-empty, those tasks run first in the placement order,
- * before the prime-eligibles pass and the non-eligibles pass — so they
- * claim slots ahead of competition. They prefer non-prime hours unless
- * also `userPinned` (pin overrides). Callers should only pass this set
- * when `date` is today; for future days, leave undefined.
+ * 05). Placement runs in three passes — prime-eligibles (top-3 ∪
+ * pinned, including any must-today member) first, must-today-only
+ * second, non-eligibles third — so a non-pinned must-today task claims
+ * slots ahead of non-eligibles but only after top-3/pinned have taken
+ * their prime slots. They prefer non-prime hours unless also
+ * `userPinned` (pin overrides). Callers should only pass this set when
+ * `date` is today; for future days, leave undefined.
  */
 export function scheduleDay(
   tasks: Task[],
