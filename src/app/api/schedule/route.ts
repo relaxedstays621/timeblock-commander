@@ -326,10 +326,13 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     scheduled: created.length,
-    // Item 09: client surfaces a "Nothing new to schedule" toast when this
-    // is true. The flag is true whenever the planner produced zero new
-    // placements — distinguishes the success-but-no-op case from an error.
-    nothingNew: created.length === 0,
+    // Item 09 (audit revise): the "Nothing new to schedule" toast only
+    // applies to the additive day/week branches. The reschedule action
+    // legitimately produces zero new placements when its only effect is
+    // to remove future blocks, so surfacing the toast there would
+    // misrepresent what just happened. Gate at the server so the client
+    // logic stays a single response.flag check.
+    nothingNew: (action === 'day' || action === 'week') && created.length === 0,
     blocks: created,
     insights: {
       top3: top3.map((t) => ({
