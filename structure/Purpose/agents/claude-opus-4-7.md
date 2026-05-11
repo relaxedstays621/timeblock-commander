@@ -40,6 +40,7 @@ Done means the requested change is implemented, verified, and unrelated work is 
 ## Relevant Standards
 
 - `../../Development/coding-principles.md`
+- `../../Deployment/deploy.md` when explicitly assigned deployment or runtime operations
 
 ## Role Escalation
 
