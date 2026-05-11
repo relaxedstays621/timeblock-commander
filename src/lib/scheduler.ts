@@ -18,7 +18,7 @@ const SLOTS_PER_HOUR = 60 / SLOT_MIN; // 4
  * AND when sizing a new placement, so a 15-min block at 9:00 prevents
  * another 15-min block from landing at 9:15.
  */
-function gridSlotsForDuration(durationMinutes: number): number {
+export function gridSlotsForDuration(durationMinutes: number): number {
   if (durationMinutes <= SLOT_MIN) return 2;
   return Math.max(1, Math.ceil(durationMinutes / SLOT_MIN));
 }

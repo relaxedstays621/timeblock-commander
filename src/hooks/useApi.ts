@@ -110,6 +110,19 @@ export async function completeBlock(id: string, actualMinutes?: number) {
   });
 }
 
+export interface MoveBlockResponse {
+  moved: { id: string; startHour: number; startMinute: number };
+  cascaded: { id: string; startHour: number; startMinute: number }[];
+  unscheduled: { id: string; taskId: string | null }[];
+}
+
+export async function moveBlock(id: string, startHour: number, startMinute: number) {
+  return api<MoveBlockResponse>(`/api/blocks/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ startHour, startMinute }),
+  });
+}
+
 // ─────────────────────────────────────────────────────────
 // SCHEDULE
 // ─────────────────────────────────────────────────────────

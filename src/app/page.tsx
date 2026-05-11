@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSession, signIn, signOut } from 'next-auth/react';
-import { useTasks, useBlocks, useAnalytics, triggerSchedule, updateTask, completeBlock, createTask } from '@/hooks/useApi';
+import { useTasks, useBlocks, useAnalytics, triggerSchedule, updateTask, completeBlock, createTask, moveBlock } from '@/hooks/useApi';
 import { QuickCapture } from '@/components/QuickCapture';
 import { CompanyTag, TaskTypeTag, ScoreBadge, StatusBadge, Modal, Spinner, EmptyState, SectionLabel } from '@/components/ui';
 import { COMPANY_DISPLAY, COMPANY_COLORS, TASK_TYPE_DISPLAY, HOURS } from '@/lib/constants';
@@ -70,6 +70,22 @@ export default function DashboardPage() {
       refreshAll();
     } catch (e: any) {
       reportError(e?.message ?? 'Failed to complete block');
+    }
+  };
+
+  const handleMoveBlock = async (blockId: string, startHour: number, startMinute: number) => {
+    try {
+      const result = await moveBlock(blockId, startHour, startMinute);
+      // Surface a soft notice when the cascade pushed any blocks past EOD;
+      // those tasks are back in the queue and the operator should know.
+      if (result.unscheduled.length > 0) {
+        reportError(
+          `${result.unscheduled.length} block(s) didn't fit and were returned to the queue.`,
+        );
+      }
+      refreshAll();
+    } catch (e: any) {
+      reportError(e?.message ?? 'Failed to move block');
     }
   };
 
@@ -233,6 +249,7 @@ export default function DashboardPage() {
                     onSelectTask={setSelectedTask}
                     onUpdateTask={handleUpdateTask}
                     onCompleteBlock={handleCompleteBlock}
+                    onMoveBlock={handleMoveBlock}
                     onReschedule={() => handleSchedule('reschedule')}
                   />
                 )}
@@ -278,7 +295,7 @@ export default function DashboardPage() {
 // TODAY VIEW
 // ─────────────────────────────────────────────────────────
 
-function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask, onCompleteBlock, onReschedule }: any) {
+function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdateTask, onCompleteBlock, onMoveBlock, onReschedule }: any) {
   const currentHour = now.getHours();
   // Always start at the current hour (clamped to >= 6) so afternoon visits
   // don't snap back to 6am.
@@ -295,6 +312,21 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
     if (typeof window === 'undefined') return {};
     try { return JSON.parse(localStorage.getItem(ignoredKey) || '{}'); } catch { return {}; }
   });
+
+  // Item 07: drag/drop state.
+  //
+  // The grip handle on each block fires pointerdown, which installs window-
+  // level pointermove/pointerup listeners for the lifetime of the drag.
+  // Movement under 5px is treated as a stray pointer twitch and does not
+  // enter drag mode (the grip just absorbs the press without changing
+  // anything). Once drag mode is entered, the dragged block is dimmed in
+  // place and a green snap-line shows the drop target; commit happens on
+  // pointerup with `onMoveBlock`. PointerEvents unify mouse + touch, so
+  // mobile drag works on the same handler without separate touch code.
+  // The grip uses `touch-action: none` (Tailwind `touch-none`) so a touch
+  // drag on the handle does not scroll the page.
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [dragPreviewSlot, setDragPreviewSlot] = useState<number | null>(null);
 
   // Persist buffer/ignore decisions across tab switches and reloads.
   useEffect(() => {
@@ -424,6 +456,59 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
     return slotsForDuration(dur);
   };
 
+  // Item 07: pointerdown handler for the drag grip. Each call installs
+  // its own window-level pointermove/pointerup pair, so the per-block
+  // closure carries the block's origSlot and duration without React state.
+  // Drag activation is deferred until the pointer has moved more than
+  // DRAG_THRESHOLD_PX so a short press on the grip does not visually
+  // jump anything. Snap is `Math.round(dy / SLOT_PX)` slot deltas; the
+  // candidate slot is clamped so the block can't drag above dayStart or
+  // past dayEnd - durSlots. On pointerup, if a non-zero delta was
+  // committed, `onMoveBlock` is called; otherwise drag state is just
+  // cleared.
+  const onBlockPointerDown = (e: React.PointerEvent, block: any) => {
+    if (block.completed) return; // completed blocks are anchored
+    e.preventDefault();
+    const startY = e.clientY;
+    const origSlot = block.startHour * SLOTS_PER_HOUR + Math.floor((block.startMinute || 0) / SLOT_MIN);
+    const durSlots = slotsForDuration(block.durationMinutes);
+    let activated = false;
+    let snappedSlot = origSlot;
+    const DRAG_THRESHOLD_PX = 5;
+
+    const onMove = (ev: PointerEvent) => {
+      const dy = ev.clientY - startY;
+      if (!activated && Math.abs(dy) < DRAG_THRESHOLD_PX) return;
+      if (!activated) {
+        activated = true;
+        setDraggingBlockId(block.id);
+      }
+      const slotDelta = Math.round(dy / SLOT_PX);
+      const candidate = Math.max(
+        dayStartSlot,
+        Math.min(dayEndSlot - durSlots, origSlot + slotDelta),
+      );
+      snappedSlot = candidate;
+      setDragPreviewSlot(candidate);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      if (!activated) return;
+      setDraggingBlockId(null);
+      setDragPreviewSlot(null);
+      if (snappedSlot !== origSlot) {
+        const newHour = Math.floor(snappedSlot / SLOTS_PER_HOUR);
+        const newMinute = (snappedSlot % SLOTS_PER_HOUR) * SLOT_MIN;
+        onMoveBlock(block.id, newHour, newMinute);
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
   // Track which slot index the most recent multi-slot item extends through,
   // so we skip rendering the rows it visually occupies.
   let coveredThrough = -1;
@@ -493,6 +578,18 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
             />
           </div>
         )}
+        {/* Item 07: drag snap-target preview line. */}
+        {dragPreviewSlot != null && (
+          <div
+            aria-hidden
+            className="absolute left-0 right-0 z-20 pointer-events-none"
+            style={{
+              top: (dragPreviewSlot - dayStartSlot) * SLOT_PX,
+              height: 2,
+              background: 'rgba(52,211,153,0.85)',
+            }}
+          />
+        )}
         {visibleSlots.map((slot) => {
           if (slot <= coveredThrough) return null;
 
@@ -543,13 +640,29 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
               <div className="flex-1 py-1">
                 {block ? (
                   <div
-                    className={`flex items-start gap-3 px-3.5 py-2 rounded-lg cursor-pointer transition-colors ${block.completed ? 'opacity-50' : 'hover:bg-white/[0.05]'}`}
+                    className={`flex items-start gap-2 px-3.5 py-2 rounded-lg cursor-pointer transition-opacity ${
+                      block.completed
+                        ? 'opacity-50'
+                        : draggingBlockId === block.id
+                          ? 'opacity-40'
+                          : 'hover:bg-white/[0.05]'
+                    }`}
                     style={{
                       borderLeft: `3px solid ${block.completed ? 'rgba(255,255,255,0.15)' : COMPANY_COLORS[block.company as Company]?.accent}`,
                       background: block.completed ? 'rgba(22,160,133,0.06)' : isCurrentSlot ? 'rgba(233,69,96,0.08)' : 'rgba(255,255,255,0.03)',
                       minHeight: rowMinHeight - 6,
                     }}
                   >
+                    {/* Item 07: drag grip. touch-none keeps mobile drags from scrolling the page. */}
+                    {!block.completed && (
+                      <div
+                        onPointerDown={(e) => onBlockPointerDown(e, block)}
+                        className="cursor-grab active:cursor-grabbing select-none touch-none flex-shrink-0 self-stretch flex items-center text-white/25 hover:text-white/60 text-[14px] leading-none px-0.5"
+                        aria-label="drag to move block"
+                      >
+                        ⋮⋮
+                      </div>
+                    )}
                     <button
                       className={`mt-0.5 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
                         block.completed
