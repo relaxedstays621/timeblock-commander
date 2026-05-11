@@ -327,14 +327,64 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
   // HOURS spans 6am..8pm; the end-of-day cutoff is the start of 9pm (slot 84).
   const SLOTS_PER_HOUR = 4;
   const SLOT_MIN = 15;
+  const SLOT_PX = 22; // visual height of one :15 row
   const dayStartSlot = dayStartHour * SLOTS_PER_HOUR;
   const dayEndSlot = 21 * SLOTS_PER_HOUR; // exclusive — last rendered slot is 8:45p
   const visibleSlots: number[] = [];
   for (let s = dayStartSlot; s < dayEndSlot; s++) visibleSlots.push(s);
 
   // The slot that "now" lives in. Used to highlight the current :15 row and
-  // to position the live-now bar in a later checklist item.
+  // as the anchor for the live-now bar (item 06).
   const currentSlot = currentHour * SLOTS_PER_HOUR + Math.floor(now.getMinutes() / SLOT_MIN);
+
+  // Item 06: live "now" bar position + on-track rule.
+  //
+  // currentBlock = the latest-starting, not-yet-completed block on today
+  // whose start is <= now. This is the block the schedule says you should
+  // be on. If there is no such block (pre-day, all done, or a gap between
+  // completed blocks) the bar still renders but in neutral.
+  //
+  // On-track rule (documented per checklist 06):
+  //   - green   if currentBlock exists AND now <= currentBlock.expectedEnd
+  //   - red     if currentBlock exists AND now >  currentBlock.expectedEnd
+  //   - neutral if no currentBlock
+  //
+  // expectedEnd = block.startMinuteOfDay + block.durationMinutes. The
+  // scheduler already aligns durations to :15 multiples, so this matches
+  // the visual end of the block on the grid.
+  //
+  // The bar reuses the top-level `now` state (60s tick in DashboardPage),
+  // so item 06 adds no new timer and no new cleanup obligation.
+  const nowMinutes = currentHour * 60 + now.getMinutes();
+  const startedNotDoneBlocks = blocks.filter((b: any) => {
+    if (b.completed) return false;
+    const startMin = b.startHour * 60 + (b.startMinute || 0);
+    return startMin <= nowMinutes;
+  });
+  const currentBlock = startedNotDoneBlocks.length > 0
+    ? startedNotDoneBlocks.reduce((latest: any, b: any) =>
+        (b.startHour * 60 + (b.startMinute || 0)) >
+        (latest.startHour * 60 + (latest.startMinute || 0)) ? b : latest)
+    : null;
+  const expectedEnd = currentBlock
+    ? currentBlock.startHour * 60 + (currentBlock.startMinute || 0) + currentBlock.durationMinutes
+    : null;
+  const onTrackState: 'green' | 'red' | 'neutral' = currentBlock
+    ? (nowMinutes <= (expectedEnd as number) ? 'green' : 'red')
+    : 'neutral';
+  const NOW_BAR_COLOR = {
+    green: 'rgb(52,211,153)',        // emerald-400 — on or ahead of pace
+    red: 'rgb(233,69,96)',           // accent-red — over the current block's budget
+    neutral: 'rgba(255,255,255,0.35)', // no block in progress
+  } as const;
+  const nowBarColor = NOW_BAR_COLOR[onTrackState];
+  // Anchor on currentSlot: jump to the top of the current :15 row, then
+  // add a sub-slot offset for the minutes inside that slot. Equivalent to
+  // `(nowMinutes - dayStartSlot*15) * (SLOT_PX/SLOT_MIN)`, but written in
+  // terms of currentSlot so the relationship to item-02's grid is explicit.
+  const nowBarTopPx = (currentSlot - dayStartSlot) * SLOT_PX
+    + (now.getMinutes() % SLOT_MIN) * (SLOT_PX / SLOT_MIN);
+  const nowBarVisible = nowMinutes >= dayStartHour * 60 && nowMinutes < 21 * 60;
 
   // Lookups operate on slot indices so a 9:30 block is not confused with a
   // 9:00 block.
@@ -373,8 +423,6 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
     const dur = Math.max(0, (end.getTime() - start.getTime()) / 60000);
     return slotsForDuration(dur);
   };
-
-  const SLOT_PX = 22; // visual height of one :15 row
 
   // Track which slot index the most recent multi-slot item extends through,
   // so we skip rendering the rows it visually occupies.
@@ -430,7 +478,21 @@ function TodayView({ now, blocks, tasks, top3, carryovers, onSelectTask, onUpdat
       )}
 
       {/* Timeline — :15 grid */}
-      <div className="mb-6">
+      <div className="mb-6 relative">
+        {/* Item 06: live "now" bar. Absolute-positioned line over the
+            timeline rows; color reflects on-track state. */}
+        {nowBarVisible && (
+          <div
+            aria-label="current time"
+            className="absolute left-0 right-0 z-10 pointer-events-none"
+            style={{ top: nowBarTopPx, height: 2, background: nowBarColor }}
+          >
+            <div
+              className="absolute -left-1 -top-[3px] w-2 h-2 rounded-full"
+              style={{ background: nowBarColor }}
+            />
+          </div>
+        )}
         {visibleSlots.map((slot) => {
           if (slot <= coveredThrough) return null;
 
