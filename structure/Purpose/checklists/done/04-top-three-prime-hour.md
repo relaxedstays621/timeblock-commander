@@ -16,12 +16,17 @@ Owner: matthewb621@gmail.com
 
 ## Audit Agent done
 
-- [ ] findings are ordered by severity and reported before any summary
-- [ ] each finding is grounded in concrete evidence or labeled as inference
-- [ ] verification gaps are named
-- [ ] missing tests are identified
-- [ ] no fixes were implemented unless explicitly reassigned
-- [ ] final recommendation is one of: accept, revise, block
+Two-pass audit conducted against this work:
+
+- **Pass 1** (against `d643916`): recommendation `Block`. Findings F1 (High, score-ordered iteration could let a non-eligible spill into prime ahead of a lower-score eligible) and F2 (Medium, POST `/api/tasks` stored a pinned task's pre-pin compositeScore).
+- **Pass 2** (against `51c3ba0` + `1f655a0`): recommendation `Accept`. Both findings resolved; the two-pass placement contract is upheld, and pinned captures persist `compositeScore: 100` immediately.
+
+- [x] findings are ordered by severity and reported before any summary
+- [x] each finding is grounded in concrete evidence or labeled as inference
+- [x] verification gaps are named (suggested manual exercise of the cross-company score-spread scenario and a pinned-capture compositeScore check)
+- [x] missing tests are identified (no test suite in repo; audit relied on tsc + reasoning trace)
+- [x] no fixes were implemented unless explicitly reassigned (Audit produced findings only; Dev applied fixes in `51c3ba0`)
+- [x] final recommendation is one of: accept, revise, block — `Accept` on re-pass
 
 ## Task-specific verification
 
