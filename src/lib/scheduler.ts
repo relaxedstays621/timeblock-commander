@@ -160,35 +160,36 @@ export function scheduleDay(
     .filter((b) => format(b.date, 'yyyy-MM-dd') === dateStr)
     .reduce((sum, b) => sum + b.durationMinutes, 0);
 
-  // Three-pass placement.
+  // Three-pass placement (refined after the item-05 audit).
   //
-  // Pass 1 — must-today (item 05): forced-today tasks claim slots first.
-  // They prefer non-prime hours unless also userPinned. Without this
-  // pass they would compete against prime-eligibles by raw score and
-  // could be displaced past end-of-day; item 05's contract is that they
-  // ALWAYS land today (or remain unscheduled, never spill to tomorrow).
+  // Pass 1 — prime-eligibles (item 04): top-3 ∪ pinned, INCLUDING any
+  // task that is also must-today. Eligibles always run before any non-
+  // eligible — including non-pinned must-today — so top-3/pinned claim
+  // their prime slots before must-today tasks compete for the leftover.
+  // This was the audit's key finding: in the prior pass-1-of-must-today
+  // order, a non-pinned must-today with `[nonPrime, prime]` could
+  // preempt a lower-score top-3 task that hadn't iterated yet.
   //
-  // Pass 2 — prime-eligibles not already placed (item 04): top-3 union
-  // pinned, with prime-first slot order. Cross-group, this pass runs
-  // before non-eligibles regardless of score so a high-score non-
-  // eligible can't preempt a lower-score eligible.
+  // Pass 2 — must-today-only (item 05): tasks marked must-today that
+  // are NOT prime-eligible. They prefer non-prime; they may fall back
+  // to prime ONLY if non-prime is full AND eligibles have already
+  // placed in Pass 1. Tasks that don't fit anywhere stay unscheduled.
   //
   // Pass 3 — non-eligibles: non-prime-first with prime as fallback.
-  // Pass-2 leftovers in prime can be claimed here, matching the
-  // checklist's "non-top-3 are excluded when prime is full" phrasing.
+  // Inherits the looser interpretation of item 04 ("excluded when prime
+  // is full"). Pass-1 leftover prime can be claimed here.
   //
   // Within each pass, score order is preserved (the source `schedulable`
-  // is already sorted desc). If a Set is undefined the corresponding
-  // partition collapses, so omitting both flags reduces to the original
-  // single-pass behaviour.
-  const mustToday = schedulable.filter(({ task }) => mustTodayTaskIds?.has(task.id));
-  const eligibles = schedulable.filter(({ task }) =>
-    !mustTodayTaskIds?.has(task.id) && primeEligibleTaskIds?.has(task.id),
+  // is already sorted desc). When the relevant Set is undefined, the
+  // partition for that pass collapses gracefully.
+  const eligibles = schedulable.filter(({ task }) => primeEligibleTaskIds?.has(task.id));
+  const mustTodayOnly = schedulable.filter(({ task }) =>
+    mustTodayTaskIds?.has(task.id) && !primeEligibleTaskIds?.has(task.id),
   );
   const nonEligibles = schedulable.filter(({ task }) =>
     !mustTodayTaskIds?.has(task.id) && !primeEligibleTaskIds?.has(task.id),
   );
-  const ordered = [...mustToday, ...eligibles, ...nonEligibles];
+  const ordered = [...eligibles, ...mustTodayOnly, ...nonEligibles];
 
   for (const { task, score } of ordered) {
     // Snap the task's estimate upward to the nearest :15 multiple. The
@@ -204,18 +205,19 @@ export function scheduleDay(
 
     const slotsNeeded = gridSlotsForDuration(task.estimatedMinutes);
 
-    // Slot order:
-    //   - must-today + userPinned (item 04 + 05 interaction): pin wins,
-    //     prime-first.
-    //   - must-today, not pinned: non-prime-first per item 05.
-    //   - prime-eligible (top-3 ∪ pinned, not in must-today partition):
-    //     prime-first per item 04.
+    // Slot order, per item 04 + 05:
+    //   - userPinned: prime-first, always (pin overrides everything).
+    //   - prime-eligible (top-3 ∪ pinned) AND NOT must-today: prime-first.
+    //   - must-today AND NOT pinned (regardless of top-3): non-prime-first.
+    //     Item 05's "preferring non-prime hours unless also userPinned"
+    //     wins over item 04's "top-3 own prime" when both apply to the
+    //     same task. A non-pinned must-today + top-3 task therefore
+    //     places first (Pass 1, eligibles) but still tries non-prime
+    //     before prime.
     //   - everyone else: non-prime-first, prime as fallback.
     const isMustToday = mustTodayTaskIds?.has(task.id) ?? false;
     const isPrimeEligible = primeEligibleTaskIds?.has(task.id) ?? false;
-    const preferPrime = isMustToday
-      ? task.userPinned
-      : isPrimeEligible;
+    const preferPrime = task.userPinned || (isPrimeEligible && !isMustToday);
 
     const slotOrder = preferPrime
       ? [...primeSlots, ...nonPrimeSlots]
