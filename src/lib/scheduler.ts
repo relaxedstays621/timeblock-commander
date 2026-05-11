@@ -152,7 +152,20 @@ export function scheduleDay(
     .filter((b) => format(b.date, 'yyyy-MM-dd') === dateStr)
     .reduce((sum, b) => sum + b.durationMinutes, 0);
 
-  for (const { task, score } of schedulable) {
+  // Two-pass placement (item 04 contract): prime-eligible tasks place
+  // FIRST, in score order, before any non-eligible runs. The earlier
+  // single-pass iteration could let a high-score non-eligible spill into
+  // prime (its [nonPrime, prime] fallback) ahead of a lower-score eligible
+  // that hadn't iterated yet, violating "top-3 or pinned own prime hours".
+  // Partitioning preserves within-group score order because `schedulable`
+  // is sorted; cross-group, eligibles always run first regardless of
+  // score. If `primeEligibleTaskIds` is omitted, the partition collapses
+  // (everyone is non-eligible) and behaviour matches the pre-item-04 pass.
+  const eligibles = schedulable.filter(({ task }) => primeEligibleTaskIds?.has(task.id));
+  const nonEligibles = schedulable.filter(({ task }) => !primeEligibleTaskIds?.has(task.id));
+  const ordered = [...eligibles, ...nonEligibles];
+
+  for (const { task, score } of ordered) {
     // Snap the task's estimate upward to the nearest :15 multiple. The
     // block end-time is start + alignedDuration; aligning here is what
     // keeps end-times :15-aligned even when the user entered a 20- or

@@ -87,7 +87,13 @@ export async function POST(req: NextRequest) {
   const dueDate = data.dueDate ? new Date(data.dueDate) : null;
 
   // Score depends only on validated input + defaults; compute it before
-  // the insert so we don't need a follow-up update.
+  // the insert so we don't need a follow-up update. `userPinned` must be
+  // included or calculateScore can't short-circuit to 100 for pinned
+  // captures, and the stored compositeScore would lag the runtime score
+  // until the next PATCH triggers a recompute. `mustBeDoneToday` is
+  // included for symmetry; today the field doesn't influence the score,
+  // but item 05 may give it weight and the insert site should already
+  // be feeding the full schema.
   const score = calculateScore({
     priority: data.priority,
     urgency: data.urgency,
@@ -96,6 +102,8 @@ export async function POST(req: NextRequest) {
     carryover: false,
     carryoverCount: 0,
     dueDate,
+    userPinned: data.userPinned,
+    mustBeDoneToday: data.mustBeDoneToday,
   } as Task);
 
   const task = await prisma.task.create({
