@@ -20,6 +20,10 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
   const [urgency, setUrgency] = useState(5);
   const [context, setContext] = useState('');
   const [duration, setDuration] = useState(60);
+  // Item-04 pin: when true, the task scores 100 and claims a prime-hour
+  // slot. Captured here on creation; the user can still toggle it later
+  // via PATCH /api/tasks/:id.
+  const [userPinned, setUserPinned] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -36,6 +40,7 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
     setTaskType('BUILDING');
     setUrgency(5);
     setContext('');
+    setUserPinned(false);
   };
 
   const submit = async () => {
@@ -57,6 +62,7 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
         isReactive: urgency >= 7,
         source: 'QUICK_CAPTURE',
         status: 'BACKLOG',
+        userPinned,
       });
 
       reset();
@@ -159,6 +165,26 @@ export function QuickCapture({ open, onClose, onCreated }: QuickCaptureProps) {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Pin to prime hours */}
+        <div>
+          <label className="block text-[11px] font-semibold text-white/40 tracking-wide mb-2">Priority pin</label>
+          <button
+            type="button"
+            className={`px-3 py-1.5 rounded-md text-[11px] font-semibold border transition-all flex items-center gap-1.5 ${
+              userPinned
+                ? 'bg-amber-400/15 text-amber-400 border-amber-400/30'
+                : 'text-white/50 bg-white/[0.04] border-white/[0.08] hover:border-white/20'
+            }`}
+            onClick={() => setUserPinned((p) => !p)}
+            aria-pressed={userPinned}
+          >
+            {userPinned ? '📌 Pinned — prime hours' : '📍 Pin to prime hours'}
+          </button>
+          {userPinned && (
+            <p className="mt-1.5 text-[10px] text-white/35">Score forced to 100; claims an 8a–12p slot.</p>
+          )}
         </div>
 
         {/* Context */}

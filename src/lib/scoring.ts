@@ -8,6 +8,13 @@ import { getISOWeek, getISOWeekYear, differenceInCalendarDays } from 'date-fns';
 // Higher score = gets scheduled first, gets better time slots.
 
 export function calculateScore(task: Task): number {
+  // User pin overrides every other factor. A pinned task always scores
+  // 100, which puts it at the top of selectTop3's score sort and
+  // guarantees it claims prime hours regardless of priority, urgency,
+  // reactive penalty, due date, or anything else. This is the contract
+  // for item 04 of the daily-planning scope: pin = top of the world.
+  if (task.userPinned) return 100;
+
   let score = 0;
 
   // Priority weight (0-100 contribution, scaled)

@@ -50,6 +50,11 @@ export const CreateTaskSchema = z.object({
   source: TaskSourceEnum.default('QUICK_CAPTURE'),
   isStrategic: z.boolean().default(false),
   isReactive: z.boolean().default(false),
+  // Item-04 pin override: score = 100, claims prime hours. Item-05
+  // mustBeDoneToday: forces today placement (item 05 owns the placement
+  // logic; the field accepts here so the capture form can set it).
+  userPinned: z.boolean().default(false),
+  mustBeDoneToday: z.boolean().default(false),
 });
 
 export const UpdateTaskSchema = CreateTaskSchema.partial().extend({

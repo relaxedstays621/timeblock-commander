@@ -1,5 +1,5 @@
-import { Task, TimeBlock, Company, EnergyLevel, TaskStatus } from '@prisma/client';
-import { calculateScore } from './scoring';
+import { Task, TimeBlock, Company, TaskStatus } from '@prisma/client';
+import { calculateScore, selectTop3 } from './scoring';
 import { format, addDays, startOfWeek, startOfDay } from 'date-fns';
 
 // All scheduling math operates on a fixed :15 grid. Hours-only configs are
@@ -68,10 +68,35 @@ export interface ScheduleSlot {
 // ─────────────────────────────────────────────────────────
 
 /**
+ * Compute the prime-eligible task-id set used by both scheduleDay and
+ * scheduleWeek. As of item 04 of the daily-planning scope, only tasks in
+ * the score-based top-3 OR user-pinned tasks claim prime-hour slots.
+ * Non-eligible tasks try non-prime slots first and only spill into prime
+ * if everything eligible is already placed. Pin = score 100, so pinned
+ * tasks naturally enter top-3 first; when more than 3 tasks are pinned,
+ * the extras still pass through this set via the userPinned union.
+ */
+export function computePrimeEligibleIds(tasks: Task[]): Set<string> {
+  const top3 = selectTop3(tasks);
+  const ids = new Set<string>(top3.map((t) => t.id));
+  for (const t of tasks) {
+    if (t.userPinned) ids.add(t.id);
+  }
+  return ids;
+}
+
+/**
  * `earliestStartSlot` clamps the day's first available slot upward. Pass
  * it when scheduling today after some of the day has elapsed — the
  * rescheduler does this so a task can't land at 9:00 when "now" is 9:42.
  * For future days, leave undefined and the configured dayStart applies.
+ *
+ * `primeEligibleTaskIds` is the set of task ids that may claim prime-hour
+ * slots first. When omitted, no task is prime-eligible (everyone tries
+ * non-prime first), which is a safe fallback but defeats the item-04
+ * rule. Callers should derive it via `computePrimeEligibleIds(tasks)`
+ * once per scheduling pass and pass it down so the set is stable across
+ * days within a week.
  */
 export function scheduleDay(
   tasks: Task[],
@@ -79,6 +104,7 @@ export function scheduleDay(
   existingBlocks: TimeBlock[],
   config: SchedulerConfig = DEFAULT_CONFIG,
   earliestStartSlot?: number,
+  primeEligibleTaskIds?: Set<string>,
 ): ScheduleSlot[] {
   const dateStr = format(date, 'yyyy-MM-dd');
 
@@ -140,10 +166,13 @@ export function scheduleDay(
 
     const slotsNeeded = gridSlotsForDuration(task.estimatedMinutes);
 
-    const needsPrime =
-      task.energyLevel === EnergyLevel.PEAK ||
-      task.energyLevel === EnergyLevel.HIGH ||
-      score >= 70;
+    // Prime eligibility is now strictly top-3 or user-pinned (item 04).
+    // The earlier energyLevel/score heuristic is gone — score still
+    // drives selectTop3 ordering, but no longer grants direct prime
+    // access. Non-eligible tasks may still land on prime slots if
+    // they're left over once eligibles are placed, but eligibles get
+    // first crack.
+    const needsPrime = primeEligibleTaskIds?.has(task.id) ?? false;
 
     const slotOrder = needsPrime
       ? [...primeSlots, ...nonPrimeSlots]
@@ -195,6 +224,10 @@ export function scheduleDay(
  * `earliestStartSlotForToday` clamps only today's first available slot;
  * future days fall back to the configured dayStart. The rescheduler passes
  * this when scheduling mid-day so already-elapsed :15 slots are skipped.
+ *
+ * Prime eligibility is computed once over the full schedulable task pool
+ * via `computePrimeEligibleIds` and passed to every day iteration so
+ * top-3 membership is stable across the week.
  */
 export function scheduleWeek(
   tasks: Task[],
@@ -213,6 +246,11 @@ export function scheduleWeek(
     .filter((t) => t.status === TaskStatus.QUEUED || t.status === TaskStatus.BACKLOG)
     .map((t) => ({ task: t, score: calculateScore(t) }))
     .sort((a, b) => b.score - a.score);
+
+  // Prime eligibility is week-stable: compute once over the schedulable
+  // pool, not per day, so a task doesn't lose top-3 status simply because
+  // an earlier day already placed someone else.
+  const primeEligibleTaskIds = computePrimeEligibleIds(scoredTasks.map((s) => s.task));
 
   // Distribute tasks across work days
   for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
@@ -236,6 +274,7 @@ export function scheduleWeek(
       existingBlocks,
       config,
       isToday ? earliestStartSlotForToday : undefined,
+      primeEligibleTaskIds,
     );
 
     for (const slot of daySlots) {

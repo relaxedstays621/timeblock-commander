@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { scheduleDay, scheduleWeek, rescheduleFromNow } from '@/lib/scheduler';
+import { scheduleDay, scheduleWeek, rescheduleFromNow, computePrimeEligibleIds } from '@/lib/scheduler';
 import { selectTop3, detectOverload, analyzeCompanyBalance, calculateScore } from '@/lib/scoring';
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { getCurrentUser } from '@/lib/auth';
@@ -214,12 +214,20 @@ export async function POST(req: NextRequest) {
         // Clamp first slot only when scheduling today. Future days fall
         // back to config.dayStart; past days are out of bounds upstream.
         const isToday = dateStr === todayLocalStr;
+        // Prime-eligible ids for this day: top-3 + pinned over the same
+        // schedulable pool the scheduler is about to consider, so the
+        // item-04 rule applies to the single-day path identically to
+        // the week path.
+        const primeEligibleTaskIds = computePrimeEligibleIds(
+          freshTasks.filter((t) => t.status === 'QUEUED' || t.status === 'BACKLOG'),
+        );
         slots = scheduleDay(
           freshTasks,
           date,
           survivingBlocks,
           config,
           isToday ? earliestStartSlotForToday : undefined,
+          primeEligibleTaskIds,
         );
       }
 
