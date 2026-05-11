@@ -117,3 +117,4 @@ Sequencing (drives checklist file numbering):
 6. Live red "now" bar with on-track cue
 7. Movable blocks with cascade
 8. Mobile menu visibility
+9. Additive Schedule Today — preserve existing blocks; explicit Clear Today is the only path back to the backlog
