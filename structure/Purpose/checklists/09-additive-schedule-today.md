@@ -1,6 +1,8 @@
 # Checklist: 09-additive-schedule-today
 
-Task: Make **Schedule Today** additive — it must place only tasks that do not already have a live block today, and must never wipe manually-placed blocks or revert their tasks to the queue. Returning items to the backlog should require the explicit **Clear Today** action that already exists in the UI.
+Task: Make **Schedule Today** and **Schedule Week** additive — both must place only tasks that do not already have a live block in the target range, and must never wipe manually-placed blocks or revert their tasks to the queue. Returning items to the backlog should require the explicit **Clear Today** action that already exists in the UI.
+
+Scope notes from operator (locked 2026-05-11): Schedule Week also moves to the additive model (decision point 1); when nothing new can be scheduled, surface a toast "Nothing new to schedule" (decision point 2); on planner-vs-manual placement conflict, pack around silently (decision point 3).
 Scope reference: `../scope.md` Active Scope (item 9 of sequencing)
 Owner: matthewb621@gmail.com
 
@@ -16,13 +18,13 @@ Today's surface, for reference:
 
 ## Development Agent done
 
-- [ ] requested change is implemented, or the blocker is stated
-- [ ] changes are scoped to the stated area
-- [ ] unrelated user or runtime changes are preserved
-- [ ] existing project patterns are followed
-- [ ] verification was run, or not-run status is explained
-- [ ] changed files are listed in the handoff
-- [ ] residual risks and follow-ups are named
+- [x] requested change is implemented, or the blocker is stated
+- [x] changes are scoped to the stated area
+- [x] unrelated user or runtime changes are preserved
+- [x] existing project patterns are followed
+- [x] verification was run, or not-run status is explained
+- [x] changed files are listed in the handoff
+- [x] residual risks and follow-ups are named
 
 ## Audit Agent done
 
@@ -37,48 +39,49 @@ Today's surface, for reference:
 
 Behavioral (manual or scripted against live runtime):
 
-- [ ] press **Schedule Today** with N queued tasks on an empty day → N blocks created
-- [ ] press **Schedule Today** a second time with no new tasks added → **zero** new blocks created; existing blocks unchanged in id, position, and `taskId`
-- [ ] manually drag an existing block to a new slot (item-07 path), then press **Schedule Today** → the dragged block keeps its position and id; its task does **not** flip back to `QUEUED`
-- [ ] add a new task to the queue after a prior **Schedule Today**, press it again → the new task lands in an open slot; **no existing block is touched**
-- [ ] press **Clear Today** → all non-completed blocks for today are removed and linked tasks revert to `QUEUED` (existing behavior preserved verbatim)
-- [ ] stale-scheduled sweep still runs: a block dated yesterday on an incomplete task is removed and its task reset before today's scheduling proceeds (do not regress the logic at `src/app/api/schedule/route.ts:74–99`)
-- [ ] a task that has a live block today is **not** placed again by the planner — the planner's task-eligibility filter must exclude tasks with a live block on the target date
-- [ ] capacity / prime-hour / must-today rules still apply to newly-placed tasks (items 04 + 05 not regressed)
-- [ ] the existing `rescheduleFromNow` action (Reschedule from now) is unchanged in semantics
+- [~] press **Schedule Today** with N queued tasks on an empty day → N blocks created
+- [~] press **Schedule Today** a second time with no new tasks added → **zero** new blocks created; existing blocks unchanged in id, position, and `taskId`; toast "Nothing new to schedule" surfaces
+- [~] manually drag an existing block to a new slot (item-07 path), then press **Schedule Today** → the dragged block keeps its position and id; its task does **not** flip back to `QUEUED`
+- [~] add a new task to the queue after a prior **Schedule Today**, press it again → the new task lands in an open slot; **no existing block is touched**
+- [~] **Schedule Week** behaves the same way: re-pressing preserves all existing blocks in the week range; new tasks land in open slots; nothing-new case surfaces the toast
+- [~] planner placement conflict with a manual block packs around silently — no surface, just lands in the next free slot (or queue if none fits within end-of-day)
+- [~] press **Clear Today** → all non-completed blocks for today are removed and linked tasks revert to `QUEUED` (existing behavior preserved verbatim)
+- [~] stale-scheduled sweep still runs: a block dated yesterday on an incomplete task is removed and its task reset before today's scheduling proceeds (do not regress the logic at `src/app/api/schedule/route.ts:74–99`)
+- [~] capacity / prime-hour / must-today rules still apply to newly-placed tasks (items 04 + 05 not regressed)
+- [~] the existing `rescheduleFromNow` action (Reschedule from now) is unchanged in semantics
+
+All behavioral rows above marked `[~]` — deferred to post-deployment exercise; this dev-side change is on the branch but has not been rebuilt + swapped into the running container yet, so live-runtime validation is not possible from this session. Code-path inspection below stands in as the dev-side check; the handoff records the verification gap.
 
 Code paths:
 
-- [ ] `clearBlocks` is no longer called from the `action === 'day'` branch
-- [ ] the day-branch planner sees the existing blocks as "survivors" and routes them into the planner's `existingBlocks` parameter so it can pack around them
-- [ ] task-eligibility filter for the day branch excludes any task that has a live block on the target date (consistent with the existing stale-scheduled `liveBlockFilter` semantics)
-- [ ] no schema changes: do not introduce an `isManual` / `locked` flag — preserving all blocks unconditionally is simpler and matches the operator's stated model
+- [x] `clearBlocks` is no longer called from the `action === 'day'` or `action === 'week'` branches
+- [x] both branches route existing blocks as "survivors" through the planner's `existingBlocks` parameter so it can pack around them
+- [x] task-eligibility filter for both branches excludes any task that has a live block on the target date(s) (consistent with the existing stale-scheduled `liveBlockFilter` semantics)
+- [x] no schema changes: do not introduce an `isManual` / `locked` flag — preserving all blocks unconditionally is simpler and matches the operator's stated model
+- [x] response payload carries a flag (e.g. `nothingNew: true`) when zero blocks are created so the client can surface the toast without re-deriving state
 
 Verification commands (Dev Agent should run before handoff):
 
-- [ ] `npx tsc --noEmit` clean for touched files
-- [ ] in-container Prisma probe still returns `DB_OK` (per `_template.md` deployment note — not a deployment task here, but if the change requires a rebuild, smoke-check before declaring done)
+- [x] `npx tsc --noEmit` clean for touched files (only the four pre-existing `googleapis` / `google-auth-library` errors, unchanged and unrelated)
+- [~] in-container Prisma probe still returns `DB_OK` — deferred because this change has not been deployed yet
 
 ## Out-of-scope guardrails
 
-- [ ] no changes to **Schedule Week** behavior in this task — see Decision points below
-- [ ] no changes to **Reschedule from now** semantics
-- [ ] no changes to the stale-scheduled sweep (`src/app/api/schedule/route.ts:74–99`)
-- [ ] no changes to `clearBlocks` itself — it is still the right primitive for **Clear Today** and **Schedule Week**
-- [ ] no schema changes (no new TimeBlock flags, no migration)
-- [ ] no UI copy / icon changes for the Schedule Today / Clear Today buttons
-- [ ] no Google Calendar reconciliation changes — calendar push remains operator-driven
+- [x] no changes to **Reschedule from now** semantics
+- [x] no changes to the stale-scheduled sweep (`src/app/api/schedule/route.ts:74–99`)
+- [x] no changes to `clearBlocks` itself — it remains the primitive for **Clear Today**
+- [x] no schema changes (no new TimeBlock flags, no migration)
+- [x] no UI copy / icon changes for the Schedule Today / Clear Today buttons
+- [x] no Google Calendar reconciliation changes — calendar push remains operator-driven
 
-## Decision points to flag for the operator
+## Decision points — resolved 2026-05-11
 
-The Dev Agent should surface these before or during implementation, not silently choose:
-
-- **Schedule Week:** does the same additive rule apply? Today's bug report is specifically about Schedule Today; Schedule Week (action `'week'`) calls `clearBlocks` over the week range. Operator preference is unknown for the week case — flag and ask, do not bundle the change without authorization.
-- **Re-press behavior when capacity is reached:** if all queued tasks are already scheduled and Schedule Today is pressed, the action becomes a no-op. Confirm the operator wants silent no-op vs. a toast / banner saying "nothing to schedule."
-- **Manually-placed conflict with planner placement:** if a manual block sits exactly where the planner wanted to put a different task, the planner should pack around it. Confirm this matches operator expectation (vs. a "conflict — couldn't place X" surface).
+1. **Schedule Week:** also additive. Drop `clearBlocks` from the week branch; pack around existing blocks across the week range.
+2. **No-op behavior:** surface a toast "Nothing new to schedule" when zero new blocks are created. Server returns a flag in the response; client routes through an info-banner (distinct from the error-banner channel).
+3. **Planner-vs-manual conflict:** pack around silently. Existing blocks are immutable survivors; the planner finds the next free slot. If a task can't fit before end-of-day, it stays in the queue without a special surface (mirrors the standard overflow path).
 
 ## Handoff readiness
 
-- [ ] active session handoff under `../session-handoffs/` records before/after behavior, the decision-point answers from the operator, and the smallest reproducer
-- [ ] git branch and commit are recorded in the handoff
-- [ ] this checklist and its session handoff are committed (not `M` or `??`) before requesting the Audit Agent — see `../delegation-contract.md` "Bookkeeping Artifact Commit Policy"
+- [x] active session handoff under `../session-handoffs/` records before/after behavior, the decision-point answers from the operator, and the smallest reproducer
+- [x] git branch and commit are recorded in the handoff
+- [x] this checklist and its session handoff are committed (not `M` or `??`) before requesting the Audit Agent — see `../delegation-contract.md` "Bookkeeping Artifact Commit Policy"
