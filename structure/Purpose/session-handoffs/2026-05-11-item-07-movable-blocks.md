@@ -39,10 +39,12 @@ Why this shape, not a "shift the whole suffix by the same delta" cascade: simple
 Takes the full Prisma client (not a `TransactionClient`) because it owns its own `$transaction`. Inside the transaction:
 
 1. **Delete unscheduled blocks** first — frees their slots.
-2. **Update placed blocks** in reverse-new-slot order. Postgres enforces unique constraints per statement; reverse-order updates ensure each `UPDATE` writes a slot that has just been vacated by the prior statement, so the `(userId, date, startHour, startMinute)` constraint never fires mid-transaction.
+2. **Two-phase update** for the placed-and-changed blocks. Postgres enforces the `(userId, date, startHour, startMinute)` unique constraint per statement, so writing the placed updates straight to their final slots fails on backward moves (`A: 42→40, B: 40→42` would write `B` to slot 42 before `A` vacates it). Resolved by parking each updated row on a sentinel date (`9999-12-31`) with its FINAL `(startHour, startMinute)` in Phase 1, then moving each back to the real date (changing only `date`) in Phase 2. The cascade plan guarantees the final `(hour, minute)` pairs are pairwise unique, so no Phase-1 statement collides on the sentinel; the cascade also guarantees moved blocks' final positions are disjoint from the unchanged ones, so no Phase-2 statement collides on the real date. Landed in `31658b2`.
 3. **Revert tasks** of unscheduled blocks from `SCHEDULED`/`IN_PROGRESS` to `QUEUED` — mirrors the existing `clearBlocks` pattern.
 
 The "moved block can't fit at all" case is detected via `plan.unscheduled.some(u => u.id === movedId)` before the transaction starts; the function throws and the API route returns 409 rather than silently unscheduling the operator's drop target.
+
+History note: the initial implementation in `113987f` used a reverse-new-slot-order trick that breaks on backward moves; the audit's `Block` finding called it out and the two-phase fix in `31658b2` resolves it. `DEFERRABLE INITIALLY DEFERRED` on the constraint was considered as an alternative but rejected because it would require a schema migration. Delete-and-recreate was rejected because it loses `block.id`.
 
 ### API endpoint (`src/app/api/blocks/[id]/route.ts`)
 
@@ -116,8 +118,8 @@ Bookkeeping (this commit):
 
 For the Audit Agent pass:
 
-- Code: `113987f`
-- Bookkeeping: this commit
+- Code: `113987f` + `31658b2` (fix for the unique-constraint Block)
+- Bookkeeping: `ab2d737` + this follow-up commit
 - Standards: `../../Development/coding-principles.md`; checklist 07's task-specific rows; `../delegation-contract.md` "Bookkeeping Artifact Commit Policy".
 - Known verification gap (do not hold against the implementation): manual desktop/mobile drag exercises are deferred behind the DB-credential blocker.
 - Design choices flagged above are open for revise/accept rather than implicit acceptance.
