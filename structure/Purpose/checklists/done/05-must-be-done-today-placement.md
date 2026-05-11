@@ -16,12 +16,17 @@ Owner: matthewb621@gmail.com
 
 ## Audit Agent done
 
-- [ ] findings are ordered by severity and reported before any summary
-- [ ] each finding is grounded in concrete evidence or labeled as inference
-- [ ] verification gaps are named
-- [ ] missing tests are identified
-- [ ] no fixes were implemented unless explicitly reassigned
-- [ ] final recommendation is one of: accept, revise, block
+Two audit passes were conducted against this work:
+
+- **Pass 1** (against `56ef4a0` + `4e99ee0`): recommendation `Revise`. High finding — non-pinned `mustBeDoneToday` tasks could claim prime slots before top-3/pinned tasks placed, conflicting with this checklist's own "prime fallback only after top-3 have claimed their prime slots" line and with item 04's accepted prime protection. Resolved by `67f703f` (three-pass placement: eligibles → must-today-only → non-eligibles, with `preferPrime = userPinned || (isPrimeEligible && !isMustToday)`) plus `598ad8f` (audit-response bookkeeping).
+- **Pass 2** (against `56ef4a0` + `4e99ee0` + `67f703f` + `598ad8f`): recommendation `Revise`. Low finding (inferred severity — doc-only divergence, no runtime impact) — `scheduleDay`'s `mustTodayTaskIds` JSDoc at lines 101-106 still described the pre-fix order; the in-function comment block at lines 163-184 already described the correct three-pass order, so the divergence was confined to the param doc. Resolved by `894001d` (JSDoc rewrite). Audit Agent accepted on the condition that `894001d` landed in source before archive.
+
+- [x] findings are ordered by severity and reported before any summary
+- [x] each finding is grounded in concrete evidence or labeled as inference
+- [x] verification gaps are named (deferred manual browser exercises — capture a non-pinned must-today at 9am, capture pinned + must-today — remain for the operator before live use)
+- [x] missing tests are identified (no test suite in repo; audit relied on tsc + reasoning trace)
+- [x] no fixes were implemented unless explicitly reassigned (Dev applied `67f703f` for the Pass-1 High finding and `894001d` for the Pass-2 Low finding)
+- [x] final recommendation is one of: accept, revise, block — `Accept` after `894001d`
 
 ## Task-specific verification
 
